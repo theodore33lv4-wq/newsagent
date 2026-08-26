@@ -29,18 +29,26 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
+    # 兼容不带子命令的调用（如 run_weekly.py --limit 6 或 --provider mock）
+    if argv and argv[0] not in ("pipeline", "report") and not argv[0].startswith("-"):
+        argv = ["pipeline"] + argv
+
+    common = argparse.ArgumentParser(add_help=False)
+    _add_common(common)
+
     parser = argparse.ArgumentParser(prog="newsagent",
-                                     description="智能交通新闻智能体")
+                                     description="智能交通新闻智能体",
+                                     parents=[common])
     sub = parser.add_subparsers(dest="command")
 
-    p_pipe = sub.add_parser("pipeline", help="运行每周流水线")
-    _add_common(p_pipe)
-
-    p_report = sub.add_parser("report", help="仅生成综述")
-    _add_common(p_report)
+    sub.add_parser("pipeline", help="运行每周流水线", parents=[common])
+    sub.add_parser("report", help="仅生成综述", parents=[common])
 
     args = parser.parse_args(argv)
+    if not args.command and not argv:
+        args.command = "pipeline"
     if not args.command:
+        # 只有根级选项（如 --limit 6）时同样走 pipeline
         args.command = "pipeline"
 
     try:

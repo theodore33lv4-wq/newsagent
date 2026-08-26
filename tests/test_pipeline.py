@@ -61,6 +61,26 @@ def test_pipeline_dry_run_no_writes(cfg, monkeypatch):
     assert Store(cfg.data_dir).query(relevant_only=False) == []
 
 
+def test_pipeline_limit_keeps_remaining(cfg, monkeypatch):
+    """limit 截断的条目不应被登记为已见：下次运行仍可处理。"""
+    import newsagent.pipeline as pipe
+    monkeypatch.setattr(pipe, "build_collectors",
+                        lambda c: [FakeCollector(c, {"id": "fake", "name": "IT测试",
+                                                     "type": "website", "limit": 10})])
+    monkeypatch.setattr(pipe, "download_and_extract",
+                        lambda a, c: FetchedContent(
+                            html="<html><body><p>x</p></body></html>",
+                            text=a.title, extractor="bs4",
+                            meta_title=a.title, meta_date=None))
+    stats1 = run_pipeline(cfg, week="2026-W35", limit=1)
+    assert stats1.new_articles == 1 and stats1.archived == 1
+    stats2 = run_pipeline(cfg, week="2026-W35", limit=10)
+    assert stats2.new_articles == 2  # 剩余 2 条仍可处理（未被误判为已见）
+    assert stats2.archived == 2
+    stats3 = run_pipeline(cfg, week="2026-W35")
+    assert stats3.new_articles == 0  # 全部处理完后再跑：零重复
+
+
 def test_pipeline_regen_no_data(cfg):
     stats = run_pipeline(cfg, week="2026-W35", regen=True)
     assert stats.errors  # 无数据 → 报错信息

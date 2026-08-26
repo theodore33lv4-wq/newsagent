@@ -1,11 +1,11 @@
 """搜狐号采集器（ITS114 等核心源）。
 
-搜狐号主页 (mp.sohu.com) 是 SPA，正文以内置接口/页面 JS 数据取文章列表。
-本实现采用多策略，任一成功即返回：
-  A) 若干候选 API（猜名可调，见 _API_CANDIDATES）
-  B) 主页 HTML 内嵌 JSON（window.__INITIAL_STATE__ 或 articleList 片段）
-
-提示：真实接口与字段在“真实源探测验证”阶段实测后在此固化。
+策略（按优先级）：
+  A) 主页内嵌 JSON：mp.sohu.com 的 profile 页服务端渲染了
+     window.blockRenderData = {...}（含文章列表：title/brief/url/postTime），
+     用 json.JSONDecoder().raw_decode 解析后递归抽取文章条目 —— 实测可用（2026-08）；
+  B) 若干候选 API（保留，作为页面结构变化时的备选）；
+  C) 页面内嵌 articleList 片段兜底。
 """
 
 from __future__ import annotations
@@ -27,9 +27,10 @@ _API_CANDIDATES = [
     "https://mp.sohu.com/api_v3/profile/v2/profileInfo?xpt={xpt}",
 ]
 
-_TIME_KEYS = ("publicTime", "publishTime", "createTime", "releaseTime", "time")
+_TIME_KEYS = ("postTime", "publicTime", "publishTime", "createTime", "releaseTime", "time")
 _URL_KEYS = ("url", "link", "articleUrl", "mpUrl", "profileUrl")
 _ID_KEYS = ("originalId", "articleId", "id")
+_BLOCK_SCRIPT_RE = re.compile(r"window\.blockRenderData\s*=\s*")
 
 
 class SohuAccountCollector(Collector):
@@ -38,11 +39,21 @@ class SohuAccountCollector(Collector):
     def collect(self) -> list[Article]:
         xpt = str(self.source.get("xpt", "")).strip()
         profile_url = str(self.source.get("profile_url") or "").strip()
-        if not xpt and not profile_url:
-            logger.error("[{}] 缺少 xpt/profile_url 配置", self.source_id)
+        if not profile_url:
+            logger.error("[{}] 缺少 profile_url 配置", self.source_id)
             return []
 
-        # 策略 A：候选 API
+        # 策略 A：主页内嵌 JSON（实测有效主路径）
+        try:
+            articles = self._collect_from_page(profile_url)
+            if articles:
+                logger.info("[{}] 策略A(页面数据) 采集 {} 条", self.source_id, len(articles))
+                return articles
+            logger.debug("[{}] 策略A 未在页面中发现文章数据", self.source_id)
+        except Exception as exc:
+            logger.debug("[{}] 策略A 失败: {}", self.source_id, exc)
+
+        # 策略 B：候选 API
         for tmpl in _API_CANDIDATES:
             try:
                 url = tmpl.format(xpt=xpt, limit=self.limit)
@@ -50,41 +61,60 @@ class SohuAccountCollector(Collector):
                 data = json.loads(resp.text)
                 items = self._extract_items(data)
                 if items:
-                    filtered = self._drop_blacklisted(items)
-                    articles = [self._to_article(it) for it in filtered]
+                    articles = [self._to_article(it) for it in self._drop_blacklisted(items)]
                     articles = [a for a in articles if a.url and a.title]
                     articles = articles[: self.limit]
-                    logger.info("[{}] 策略A(API {}) 采集 {} 条", self.source_id,
+                    logger.info("[{}] 策略B(API {}) 采集 {} 条", self.source_id,
                                 url.split("?")[0], len(articles))
                     return articles
             except Exception as exc:
-                logger.debug("[{}] 策略A 失败 {}: {}", self.source_id, tmpl.split("?")[0], exc)
-
-        # 策略 B：主页内嵌 JSON
-        if profile_url:
-            try:
-                articles = self._collect_from_page(profile_url)
-                if articles:
-                    logger.info("[{}] 策略B(页面JSON) 采集 {} 条", self.source_id, len(articles))
-                    return articles
-                logger.debug("[{}] 策略B 未在页面中发现文章数据", self.source_id)
-            except Exception as exc:
-                logger.debug("[{}] 策略B 失败: {}", self.source_id, exc)
+                logger.debug("[{}] 策略B 失败 {}: {}", self.source_id, tmpl.split("?")[0], exc)
 
         logger.warning("[{}] 所有采集策略均未取得文章（{}）", self.source_id, xpt)
         return []
 
+    # ---- 页面 JSON 提取 ----
+    def _collect_from_page(self, profile_url: str) -> list[Article]:
+        with new_http_client(self.cfg) as client:
+            resp = fetch(profile_url, self.cfg, client=client)
+            text = resp.text
+
+            # 主路径：window.blockRenderData（raw_decode 只消费首个合法 JSON 值）
+            data = None
+            m = _BLOCK_SCRIPT_RE.search(text)
+            if m:
+                try:
+                    data, _ = json.JSONDecoder().raw_decode(text[m.end():])
+                except Exception as exc:
+                    logger.debug("[{}] blockRenderData 解析失败: {}", self.source_id, exc)
+
+            items: list[dict] = []
+            if data is not None:
+                items = self._extract_items(data)
+            if not items:
+                # 兜底：articleList 片段
+                try:
+                    m = re.search(r'"articleList"\s*:\s*(\[.*?\])', text, re.S)
+                    if m:
+                        items = self._extract_items(json.loads(m.group(1)))
+                except Exception:
+                    pass
+
+            articles = [self._to_article(it) for it in self._drop_blacklisted(items)]
+            return [a for a in articles if a.url and a.title][: self.limit]
+
     # ---- 数据提取 ----
     @staticmethod
     def _extract_items(data: Any) -> list[dict]:
-        """自任意嵌套结构递归挖出「含 title 且有链接/ID 的文章字典」。"""
+        """自任意嵌套结构递归挖出「含 title/url 的搜狐文章字典」。"""
         hits: list[dict] = []
 
         def walk(node: Any) -> None:
             nonlocal hits
             if isinstance(node, dict):
-                if ("title" in node or "titleDesc" in node) and (
-                        any(k in node for k in _URL_KEYS + _ID_KEYS)):
+                url = str(node.get("url") or "")
+                if ("title" in node and "authorName" in node
+                        and "/a/" in url and node.get("id")):
                     hits.append(node)
                 for v in node.values():
                     walk(v)
@@ -152,24 +182,3 @@ class SohuAccountCollector(Collector):
                 except ValueError:
                     continue
         return None
-
-    def _collect_from_page(self, profile_url: str) -> list[Article]:
-        with new_http_client(self.cfg) as client:
-            resp = fetch(profile_url, self.cfg, client=client)
-            text = resp.text
-            candidates: list[str] = []
-            m = re.search(r"window\.__INITIAL_STATE__\s*=\s*(\{.*?\})\s*;", text, re.S)
-            if m:
-                candidates.append(m.group(1))
-            m = re.search(r'"articleList"\s*:\s*(\[.*?\])', text, re.S)
-            if m:
-                candidates.append(m.group(1))
-            items: list[dict] = []
-            for blob in candidates:
-                try:
-                    data = json.loads(blob)
-                except Exception:
-                    continue
-                items.extend(self._extract_items(data))
-            articles = [self._to_article(it) for it in self._drop_blacklisted(items)]
-            return [a for a in articles if a.url and a.title][: self.limit]

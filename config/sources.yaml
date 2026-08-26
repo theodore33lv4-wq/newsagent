@@ -1,10 +1,14 @@
 # 新闻源配置（全部为国内源）
 # 类型说明：
-#   sohu_account : 搜狐号作者主页（ITS114 等，核心源）
+#   sohu_account : 搜狐号作者主页（ITS114 等，核心源；解析主页内嵌 JSON，已实测可用）
 #   rss          : RSS 订阅
 #   website      : 固定站点抓取（list_url 列表页 + article_selector 文章链接选择器）
 #
-# 尚未验证可达性的源默认 enabled: false，实施验证（任务“真实源探测验证”）通过后开启。
+# 探测记录（2026-08）：
+#   - its114 官网 www.its114.com：SSL 连接被阻断 → 停用，以搜狐号为主
+#   - 赛文交通网 7its.com/7its.cn：小鹅通 SPA，静态采集不可行 → 停用，待方案
+#   - 中国政府采购网 search.ccgp.gov.cn：反爬（无结果链接）→ 停用
+#   - 必应中文搜索：结果质量不稳定（常返回无关英文结果）→ search.enabled=false
 
 sources:
   - id: its114_sohu
@@ -16,37 +20,31 @@ sources:
     profile_url: "https://mp.sohu.com/profile?xpt=aXRzMTE0QHNvaHUuY29t"
     limit: 40
 
+  - id: mot_news
+    name: 交通运输部·交通要闻（政策类）
+    type: website
+    enabled: true
+    base_url: https://www.mot.gov.cn
+    list_url: https://www.mot.gov.cn/xinwen/jiaotongyaowen/index.html
+    article_selector: "a[href*='t2026']"   # 实测：文章链接形如 .../202608/t20260826_4223213.html
+    limit: 25
+
+  # ---- 已探测、暂不可用的源（保留配置便于日后启用） ----
   - id: its114_www
-    name: ITS114 智慧交通网（官网，搜狐号接口不可用时的退路）
+    name: ITS114 智慧交通网（官网，SSL 被阻断，暂不可用）
     type: website
     enabled: false
     base_url: https://www.its114.com
-    list_url: https://www.its114.com/           # 待探测验证
-    article_selector: "h3 a"                    # 待探测验证
+    list_url: https://www.its114.com/
+    article_selector: "a"
     limit: 30
 
   - id: 7its
-    name: 赛文交通网（集成商密集）
+    name: 赛文交通网（小鹅通 SPA，暂不可用）
     type: website
     enabled: false
-    base_url: https://www.7its.com
-    list_url: https://www.7its.com/             # 待探测验证
-    article_selector: "h3 a"                    # 待探测验证
+    base_url: https://www.7its.cn
+    list_url: https://www.7its.cn/news/
+    article_selector: "a"
     limit: 30
 
-  - id: mot_news
-    name: 交通运输部新闻（政策类，待验证）
-    type: website
-    enabled: false
-    base_url: https://www.mot.gov.cn
-    list_url: https://www.mot.gov.cn/jiaotongyaowen/   # 待探测验证
-    article_selector: "a"                             # 待探测验证
-    limit: 20
-
-  # ---- 待调研补充：国内交通行业 RSS（feedparser 可用源） ----
-  # - id: rss_example
-  #   name: "示例 RSS"
-  #   type: rss
-  #   enabled: false
-  #   url: "https://example.com/rss"
-  #   limit: 20

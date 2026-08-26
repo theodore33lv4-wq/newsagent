@@ -73,9 +73,15 @@ def run_pipeline(cfg: Config, *, week: str | None = None, limit: int | None = No
     stats.candidates = len(candidates)
 
     checker = DedupChecker(*store.seen_keys())
-    new_articles = checker.dedupe(candidates)
+    # 先过滤出新条目，再应用 limit；只有实际处理的条目才登记去重，
+    # 避免 limit 截断的条目在下次运行被误判为"已见过"
+    new_all = [a for a in candidates if checker.is_new(a)]
     if limit:
-        new_articles = new_articles[: max(0, int(limit))]
+        new_articles = new_all[: max(0, int(limit))]
+    else:
+        new_articles = new_all
+    for a in new_articles:
+        checker.add(a)
     stats.new_articles = len(new_articles)
 
     if dry_run:

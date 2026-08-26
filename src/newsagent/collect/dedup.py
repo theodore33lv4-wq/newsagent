@@ -16,7 +16,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from .base import Article
 
 _TRACKING_PREFIXES = ("utm_",)
-_TRACKING_NAMES = {"spm", "from", "share_token", "share_medium", "share_plat",
+_TRACKING_NAMES = {"spm", "scm", "from", "share_token", "share_medium", "share_plat",
                    "share_source", "gsm", "bd_page_type", "_t"}
 _KEEP_CHARS = re.compile(r"[^0-9a-zA-Z\u4e00-\u9fff]")
 

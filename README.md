@@ -125,12 +125,14 @@ newsagent/
 ## 附录：常用命令
 
 ```powershell
-# 试跑（最多 5 条，不写索引只预览）
-python scripts\run_weekly.py --dry-run --limit 5
+# 采集链路预览（只采集+去重，不下载、不落库）
+python scripts\run_weekly.py --dry-run
+# 小规模真实验证（最多 5 条，会真实写入 data/，可人工核验标签质量）
+python scripts\run_weekly.py --limit 5
 # 完整跑本周
 python scripts\run_weekly.py
 # 重新生成某周综述（不重新采集）
-python -m newsagent report --week 2026-W09 --regen
+python scripts\run_weekly.py --regen --week 2026-W09
 # 环境自检
 python scripts\check_env.py
 ```

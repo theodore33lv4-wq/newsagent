@@ -171,6 +171,18 @@ class Store:
         with self._connect() as conn:
             conn.execute("UPDATE articles SET note=? WHERE guid=?", (note, guid))
 
+    def article_text(self, row: dict) -> str | None:
+        """读取存档的正文文本（从 text_file 的 JSON）。"""
+        text_file = row.get("text_file")
+        if not text_file:
+            return None
+        try:
+            data = json.loads((self.data_dir / text_file).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        text = data.get("text")
+        return text if isinstance(text, str) and text else None
+
     # ---------- 查询（未来 Web 站复用的检索接口） ----------
     def query(self, *, week: str | None = None, tag: str | None = None,
               keyword: str | None = None, company: str | None = None,

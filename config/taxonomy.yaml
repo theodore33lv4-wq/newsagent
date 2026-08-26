@@ -1,0 +1,28 @@
+# 标签体系（可增删；LLM 只允许从本树中选择，格式 "一级/二级"）
+taxonomy:
+  - name: 自动驾驶
+    children: [乘用车自动驾驶, 商用车自动驾驶, 矿区港口自动驾驶, 自动驾驶测试]
+  - name: 车路协同/智能网联
+    children: [试点城市与示范区, 车路云一体化, 设备与芯片, 通信技术]
+  - name: 智慧高速
+    children: [机电与改扩建, 不停车收费, 车流与服务区]
+  - name: 智能公交/出租
+    children: [公交智能化, 出租车与网约车, 慢行与停车]
+  - name: 信号与交管
+    children: [信号控制优化, 交通管理平台, 电子警察与监测]
+  - name: 政策法规
+    children: []
+  - name: 标准规范
+    children: []
+  - name: 产业动态/投融资
+    children: [企业财报, 融资并购, 项目中标]
+  - name: 厂商动态
+    children: [集成商动态, 设备商动态, 中标与采购]
+  - name: 海外动态
+    children: []
+  - name: 事故与安全
+    children: []
+  - name: 展会会议
+    children: []
+  - name: 其他
+    children: []

@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "newsagent"
+version = "0.1.0"
+description = "智能交通新闻智能体：每周自动采集、打标、综述（内部实验项目）"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx==0.28.1",
+    "feedparser==6.0.14",
+    "beautifulsoup4==4.15.0",
+    "lxml==6.1.2",
+    "trafilatura==2.2.0",
+    "jinja2==3.1.6",
+    "python-docx==1.2.0",
+    "loguru==0.7.3",
+    "pyyaml==6.0.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

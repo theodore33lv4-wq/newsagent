@@ -1,0 +1,52 @@
+# 新闻源配置（全部为国内源）
+# 类型说明：
+#   sohu_account : 搜狐号作者主页（ITS114 等，核心源）
+#   rss          : RSS 订阅
+#   website      : 固定站点抓取（list_url 列表页 + article_selector 文章链接选择器）
+#
+# 尚未验证可达性的源默认 enabled: false，实施验证（任务“真实源探测验证”）通过后开启。
+
+sources:
+  - id: its114_sohu
+    name: ITS114智慧交通（搜狐号）
+    type: sohu_account
+    enabled: true
+    account: "智慧交通"
+    xpt: "aXRzMTE0QHNvaHUuY29t"          # 搜狐号标识
+    profile_url: "https://mp.sohu.com/profile?xpt=aXRzMTE0QHNvaHUuY29t"
+    limit: 40
+
+  - id: its114_www
+    name: ITS114 智慧交通网（官网，搜狐号接口不可用时的退路）
+    type: website
+    enabled: false
+    base_url: https://www.its114.com
+    list_url: https://www.its114.com/           # 待探测验证
+    article_selector: "h3 a"                    # 待探测验证
+    limit: 30
+
+  - id: 7its
+    name: 赛文交通网（集成商密集）
+    type: website
+    enabled: false
+    base_url: https://www.7its.com
+    list_url: https://www.7its.com/             # 待探测验证
+    article_selector: "h3 a"                    # 待探测验证
+    limit: 30
+
+  - id: mot_news
+    name: 交通运输部新闻（政策类，待验证）
+    type: website
+    enabled: false
+    base_url: https://www.mot.gov.cn
+    list_url: https://www.mot.gov.cn/jiaotongyaowen/   # 待探测验证
+    article_selector: "a"                             # 待探测验证
+    limit: 20
+
+  # ---- 待调研补充：国内交通行业 RSS（feedparser 可用源） ----
+  # - id: rss_example
+  #   name: "示例 RSS"
+  #   type: rss
+  #   enabled: false
+  #   url: "https://example.com/rss"
+  #   limit: 20

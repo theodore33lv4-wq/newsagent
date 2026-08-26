@@ -1,0 +1,44 @@
+# newsagent 主配置
+# 所有路径相对仓库根目录；可被环境变量或命令行参数覆盖（开发中）。
+
+app:
+  timezone: Asia/Shanghai        # 周编号、发布时间均按此时区
+  data_dir: data                 # 运行产物根目录（raw/articles/reports/logs/index.sqlite3）
+
+llm:
+  provider: mock                 # openai-compat | ollama | mock（无 Key 验证流水线）
+  model: deepseek-chat           # 打标/综述默认模型（国内 API 如 DeepSeek/智谱/通义）
+  base_url: https://api.deepseek.com/v1
+  api_key_env: LLM_API_KEY       # 从 .env 读取的变量名
+  temperature: 0.2
+  timeout_seconds: 120
+  max_retries: 2
+  tagger_model: null             # 置为模型名可单独指定打标模型（null = 用 model）
+  report_model: null             # 置为模型名可单独指定综述模型（null = 用 model）
+
+collect:
+  per_source_limit: 40           # 每源单次采集上限
+  fetch_timeout_seconds: 20
+  retries: 2
+  concurrency: 4                 # 存档下载并发数
+  request_interval_seconds: 1.0  # 采集节流（礼貌爬取，降低反爬风险）
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+  search:
+    enabled: false               # 国内搜索引擎补充；验证可行性后再开启
+    engine: bing                 # bing | baidu_news
+    keywords: ["智能交通", "车路协同", "智慧高速", "交通信号", "自动驾驶"]
+    max_results_per_keyword: 5
+
+classify:
+  summary_max_chars: 100         # LLM 输出摘要长度上限（提示词中约定）
+  json_retries: 1                # JSON 解析失败额外重试次数
+
+report:
+  max_items: 120                 # 综述输入条目上限（超出按重要度截断）
+  summary_max_chars: 90          # 输入 LLM 的单条摘要截断长度
+  formats: ["html", "docx"]      # 输出格式（html 为自包含单文件）
+  schedule_note: "每周一 08:00（Windows 任务计划程序）"
+
+notify:
+  enabled: false                 # 失败告警（企业微信/钉钉/飞书群机器人）
+  webhook_url_env: NOTIFY_WEBHOOK_URL

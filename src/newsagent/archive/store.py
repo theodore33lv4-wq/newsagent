@@ -211,9 +211,9 @@ class Store:
             where.append("companies_json LIKE ?")
             params.append(f'%"{company}"%')
         if keyword:
-            where.append("(title LIKE ? OR summary LIKE ?)")
+            where.append("(title LIKE ? OR summary LIKE ? OR keywords_json LIKE ?)")
             like = f"%{keyword}%"
-            params.extend([like, like])
+            params.extend([like, like, like])
         if importance is not None:
             where.append("importance=?")
             params.append(int(importance))

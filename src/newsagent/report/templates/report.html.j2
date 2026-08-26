@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>智能交通周报 {{ week }} · newsagent</title>
+<style>
+  :root { --primary:#0b5f8a; --accent:#c2701d; --bg:#f5f7f9; --line:#dde4ea; }
+  * { box-sizing: border-box; }
+  body { font-family:"Microsoft YaHei","PingFang SC","Noto Sans CJK SC",sans-serif;
+         background:var(--bg); color:#1f2a33; margin:0; line-height:1.75; }
+  .page { max-width: 900px; margin: 0 auto; padding: 24px 20px 60px; }
+  header { background:linear-gradient(135deg,#0b5f8a,#1381a8); color:#fff;
+           border-radius:12px; padding:26px 30px; margin-bottom:22px; }
+  header h1 { margin:0 0 6px; font-size:26px; letter-spacing:1px; }
+  header .meta { opacity:.92; font-size:13px; }
+  section { background:#fff; border:1px solid var(--line); border-radius:10px;
+            padding:18px 24px; margin-bottom:18px; }
+  h2 { font-size:18px; color:var(--primary); border-left:4px solid var(--primary);
+       padding-left:10px; margin:0 0 12px; }
+  h3 { font-size:15px; color:#0e4a6b; margin:14px 0 6px; }
+  .overview p { margin:0 0 8px; }
+  .theme { margin-bottom:10px; }
+  .theme .note { color:#4a5b68; margin-left:8px; }
+  .rank { font-weight:bold; color:var(--accent); margin-right:6px; }
+  ul.trends li, ul.next li { margin:4px 0; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { border:1px solid var(--line); padding:6px 8px; text-align:left; vertical-align:top; }
+  th { background:#eef4f8; color:#0e4a6b; }
+  .tag { display:inline-block; background:#e7f1f7; color:#0b5f8a; border-radius:3px;
+         padding:0 6px; margin:1px 3px 1px 0; font-size:12px; }
+  .imp { color:var(--accent); font-weight:bold; }
+  a { color:#0b5f8a; text-decoration:none; } a:hover { text-decoration:underline; }
+  .footnote { color:#7c8b96; font-size:12px; margin-top:14px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <h1>智能交通新闻周报</h1>
+    <div class="meta">{{ week_label }} ｜ 生成时间：{{ generated_at }} ｜
+      收录 {{ relevant_count }} 条 / 来源 {{ source_count }} 个</div>
+  </header>
+
+  <section class="overview">
+    <h2>本周概览</h2>
+    <p>{{ overview }}</p>
+    {% if fallback %}<p class="footnote">（说明：本节为自动降级生成，LLM 服务暂不可用）</p>{% endif %}
+  </section>
+
+  <section>
+    <h2>分主题要点</h2>
+    {% for t in themes %}
+    <div class="theme">
+      <h3>{{ t.title }}</h3>
+      <ul>
+        {% for it in t['items'] %}
+        <li><a href="#item-{{ it.idx }}">#{{ it.idx }} {{ item_title(it.idx) }}</a>
+            <span class="note">{{ it.note }}</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endfor %}
+  </section>
+
+  <section>
+    <h2>本周 TOP{% if top5 %}{{ top5|length }}{% else %}5{% endif %}</h2>
+    <ol>
+      {% for idx in top5 %}
+      <li><span class="rank">{{ loop.index }}.</span>
+          <a href="#item-{{ idx }}">{{ item_title(idx) }}</a>
+          {% if item_tags(idx) %}{% for t in item_tags(idx) %}<span class="tag">{{ t }}</span>{% endfor %}{% endif %}</li>
+      {% endfor %}
+    </ol>
+  </section>
+
+  <section>
+    <h2>厂商与集成商动态</h2>
+    <ul>
+      {% set vendor_items = vendor_items() %}
+      {% if vendor_items %}
+        {% for it in vendor_items %}
+        <li><a href="#item-{{ it.idx }}">#{{ it.idx }} {{ it.title }}</a>
+            <span class="imp">{{ stars(it.importance) }}</span>
+            {% for c in it.companies %}<span class="tag">{{ c }}</span>{% endfor %}</li>
+        {% endfor %}
+      {% else %}
+        <li>本周没有明显的厂商/集成商动态条目。</li>
+      {% endif %}
+    </ul>
+  </section>
+
+  <section>
+    <h2>趋势观察</h2>
+    <ul class="trends">
+      {% for t in trends %}<li>{{ t }}</li>{% else %}<li>（无）</li>{% endfor %}
+    </ul>
+  </section>
+
+  <section>
+    <h2>下周关注</h2>
+    <ul class="next">
+      {% for n in next_week %}<li>{{ n }}</li>{% else %}<li>（无）</li>{% endfor %}
+    </ul>
+  </section>
+
+  <section>
+    <h2>附录：本周新闻清单（{{ items|length }} 条）</h2>
+    <table>
+      <thead><tr><th>#</th><th>标题</th><th>来源</th><th>标签</th><th>重要度</th><th>链接</th></tr></thead>
+      <tbody>
+      {% for it in items %}
+        <tr id="item-{{ it.idx }}">
+          <td>{{ it.idx }}</td>
+          <td>
+            {% if it.summary %}<div><strong>{{ it.title }}</strong></div>
+            <div style="color:#4a5b68;font-size:12px">{{ it.summary }}</div>
+            {% else %}<strong>{{ it.title }}</strong>{% endif %}
+          </td>
+          <td>{{ it.source_name }}<br><span style="color:#7c8b96;font-size:12px">{{ it.published_at }}</span></td>
+          <td>{% for t in it.tags %}<span class="tag">{{ t }}</span>{% endfor %}</td>
+          <td class="imp">{{ it.importance if it.importance else '—' }}</td>
+          <td>{% if it.url %}<a href="{{ it.url }}" target="_blank" rel="noopener">原文</a>{% endif %}
+              {% if it.html_file %}<a href="{{ it.html_file }}" title="{{ it.html_file }}">存档</a>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="footnote">说明：本报告由 newsagent 自动生成，仅限部门内部使用；存档链接为原始网页快照（相对路径，需在 data 目录内打开）。</p>
+  </section>
+</div>
+</body>
+</html>

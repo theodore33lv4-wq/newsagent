@@ -32,6 +32,9 @@ collect:
 classify:
   summary_max_chars: 100         # LLM 输出摘要长度上限（提示词中约定）
   json_retries: 1                # JSON 解析失败额外重试次数
+  max_input_chars: 2000          # 单条新闻正文输入上限（截断防超长）
+  concurrency: 4                 # 打标并行数
+  vendor_importance_floor: 2     # 厂商动态类新闻的重要度下限（保障占比）
 
 report:
   max_items: 120                 # 综述输入条目上限（超出按重要度截断）

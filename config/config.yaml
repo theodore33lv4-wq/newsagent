@@ -6,8 +6,8 @@ app:
   data_dir: data                 # 运行产物根目录（raw/articles/reports/logs/index.sqlite3）
 
 llm:
-  provider: mock                 # openai-compat | ollama | mock（无 Key 验证流水线）
-  model: deepseek-chat           # 打标/综述默认模型（国内 API 如 DeepSeek/智谱/通义）
+  provider: openai-compat         # openai-compat | ollama | mock（mock 无 Key 验证流水线）
+  model: deepseek-v4-flash-vision-exp   # 实测可用（API 要求小写；用户指定 V4-Flash-Vision-Exp）
   base_url: https://api.deepseek.com/v1
   api_key_env: LLM_API_KEY       # 从 .env 读取的变量名
   temperature: 0.2

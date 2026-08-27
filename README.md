@@ -76,7 +76,7 @@ newsagent/
 ### 本机（开发/验证）
 
 1. `python -m venv .venv` → `.venv\Scripts\pip install -e .`（国内网络可用清华大学镜像 `-i https://pypi.tuna.tsinghua.edu.cn/simple`）
-2. 复制 `.env.example` 为 `.env` 并填写 API Key（没有 Key 时默认走 Mock，可完整跑通流水线）
+2. 复制 `.env.example` 为 `.env` 并填写 API Key（默认 `llm.provider: openai-compat`；无 Key 时可临时 `--provider mock` 验证流水线）
 3. `python scripts/run_weekly.py --dry-run --limit 5` 试跑 → 全量跑 → 人工抽查标签/综述质量 → 调整 `config/taxonomy.yaml`
 4. 查看产物：`data/reports/<周>/` 下 HTML（浏览器直接打开）与 Word
 

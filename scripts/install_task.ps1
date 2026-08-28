@@ -1,4 +1,4 @@
-# install_task.ps1 —— 注册每周一 08:00 的 newsagent 定时任务（Windows 任务计划程序）
+﻿# install_task.ps1 —— 注册每周一 08:00 的 newsagent 定时任务（Windows 任务计划程序）
 # 用法：以管理员身份运行：powershell -ExecutionPolicy Bypass -File scripts\install_task.ps1
 #       （可选）加 -Uninstall 移除任务
 
@@ -51,7 +51,7 @@ Write-Host "命令      ：$cmd"
 Write-Host ""
 Write-Host "注意事项："
 Write-Host "  1) 请确认系统时区为北京时间（服务器时钟影响周编号与触发时间）："
-Write-Host "     tzutil /s \"China Standard Time\""
+Write-Host '     tzutil /s "China Standard Time"'
 Write-Host "  2) 首次建议手动验证："
 Write-Host "     .venv\Scripts\python.exe scripts\run_weekly.py --limit 5"
 Write-Host "  3) 立即运行一次可执行：schtasks /Run /TN $TaskName"

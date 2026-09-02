@@ -44,6 +44,7 @@ TAXONOMY_CONFIG = {
         {"name": "车路协同/智能网联", "children": ["试点城市与示范区"]},
         {"name": "智慧高速", "children": []},
         {"name": "政策法规", "children": []},
+        {"name": "其他", "children": []},
     ]
 }
 

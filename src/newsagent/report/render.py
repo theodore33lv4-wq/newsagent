@@ -26,17 +26,26 @@ def _stars(importance) -> str:
     return "★" * max(0, min(3, i))
 
 
-def _index(data: ReportData) -> dict[int, dict]:
-    return {it["idx"]: it for it in data.items}
+def _index(items: list[dict]) -> dict[int, dict]:
+    return {it["idx"]: it for it in items}
 
 
-def render_html(data: ReportData) -> str:
-    """渲染自包含 HTML 文本。"""
-    by_idx = _index(data)
+def render_html(data: ReportData, items: list[dict] | None = None) -> str:
+    """渲染自包含 HTML 文本。
+
+    items：附录清单渲染用的条目（可变形版本，带 html_link 相对路径）；
+    缺省使用 data.items（测试/无落盘场景）。
+    """
+    render_items = items if items is not None else data.items
+    by_idx = _index(data.items)
 
     def item_title(idx) -> str:
         it = by_idx.get(idx)
         return it["title"] if it else "(未知条目)"
+
+    def item_url(idx) -> str:
+        it = by_idx.get(idx)
+        return (it["url"] if it and it.get("url") else "#") or "#"
 
     def item_tags(idx) -> list[str]:
         it = by_idx.get(idx)
@@ -52,10 +61,13 @@ def render_html(data: ReportData) -> str:
     template = _env.get_template("report.html.j2")
     return template.render(
         week=data.week, week_label=data.week_label, generated_at=data.generated_at,
-        overview=data.overview, themes=data.themes, top5=data.top5,
-        trends=data.trends, next_week=data.next_week, items=data.items,
+        overview=data.overview, overview_points=data.overview_points,
+        distribution=data.distribution,
+        themes=data.themes, top5=data.top5,
+        trends=data.trends, next_week=data.next_week, items=render_items,
         relevant_count=data.relevant_count, source_count=data.source_count,
         fallback=data.fallback,
-        item_title=item_title, item_tags=item_tags, vendor_items=vendor_items,
+        item_title=item_title, item_url=item_url, item_tags=item_tags,
+        vendor_items=vendor_items,
         stars=_stars,
     )

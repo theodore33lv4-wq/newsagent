@@ -130,9 +130,16 @@ class MockLLMProvider(LLMProvider):
             }, ensure_ascii=False)
         if "周报综述" in system:
             return json.dumps({
-                "overview": "Mock 综述：本周智能交通领域动态聚焦车路协同与集成商中标。",
+                "overview": "Mock 综述：本周智能交通领域动态聚焦车路协同与集成商中标。"
+                            "政策端推动车路云一体化试点扩大，产业端多家集成商披露中标信息，"
+                            "智慧高速建设进入机电改扩建密集期。",
+                "overview_points": [
+                    "政策：车路云一体化试点范围扩大",
+                    "产业：两家集成商披露中标信息",
+                    "城市：多地推进信号控制优化",
+                ],
                 "themes": [
-                    {"title": "车路协同", "items": [{"idx": 1, "note": "试点城市扩大。"}]},
+                    {"title": "车路协同/智能网联", "items": [{"idx": 1, "note": "试点城市扩大。"}]},
                     {"title": "厂商动态", "items": [{"idx": 2, "note": "两家集成商中标。"}]},
                 ],
                 "top5": [1, 2],

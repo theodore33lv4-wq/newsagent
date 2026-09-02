@@ -20,6 +20,17 @@
        padding-left:10px; margin:0 0 12px; }
   h3 { font-size:15px; color:#0e4a6b; margin:14px 0 6px; }
   .overview p { margin:0 0 8px; }
+  .overview ul { margin:4px 0 4px; padding-left:20px; }
+  .overview ul li { margin:3px 0; }
+  /* 类别分布条形图 */
+  .bars .bar-row { display:flex; align-items:center; margin:6px 0; }
+  .bars .bar-label { width:130px; flex:none; text-align:right; padding-right:10px;
+                     font-size:13px; color:#2c3e50; }
+  .bars .bar-track { flex:1; background:#eef1f5; border-radius:3px; height:18px; }
+  .bars .bar-fill { height:100%; border-radius:3px;
+                    background:linear-gradient(90deg,#4a90d9,#6ba7e0); }
+  .bars .bar-count { width:44px; flex:none; text-align:left; padding-left:10px;
+                     font-size:13px; color:#0e4a6b; font-weight:bold; }
   .theme { margin-bottom:10px; }
   .theme .note { color:#4a5b68; margin-left:8px; }
   .rank { font-weight:bold; color:var(--accent); margin-right:6px; }
@@ -45,8 +56,29 @@
   <section class="overview">
     <h2>本周概览</h2>
     <p>{{ overview }}</p>
+    {% if overview_points %}
+    <ul>
+      {% for pt in overview_points %}<li>{{ pt }}</li>{% endfor %}
+    </ul>
+    {% endif %}
     {% if fallback %}<p class="footnote">（说明：本节为自动降级生成，LLM 服务暂不可用）</p>{% endif %}
   </section>
+
+  {% if distribution %}
+  <section>
+    <h2>类别分布</h2>
+    <div class="bars">
+      {% for d in distribution %}
+      <div class="bar-row">
+        <span class="bar-label">{{ d.name }}</span>
+        <div class="bar-track"><div class="bar-fill" style="width:{{ d.pct }}%"></div></div>
+        <span class="bar-count">{{ d.count }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    <p class="footnote">按一级标签统计（共 {{ relevant_count }} 条）</p>
+  </section>
+  {% endif %}
 
   <section>
     <h2>分主题要点</h2>
@@ -55,7 +87,7 @@
       <h3>{{ t.title }}</h3>
       <ul>
         {% for it in t['items'] %}
-        <li><a href="#item-{{ it.idx }}">#{{ it.idx }} {{ item_title(it.idx) }}</a>
+        <li><a href="{{ item_url(it.idx) }}" target="_blank" rel="noopener">{{ item_title(it.idx) }}</a>
             <span class="note">{{ it.note }}</span></li>
         {% endfor %}
       </ul>
@@ -67,8 +99,7 @@
     <h2>本周 TOP{% if top5 %}{{ top5|length }}{% else %}5{% endif %}</h2>
     <ol>
       {% for idx in top5 %}
-      <li><span class="rank">{{ loop.index }}.</span>
-          <a href="#item-{{ idx }}">{{ item_title(idx) }}</a>
+      <li><a href="{{ item_url(idx) }}" target="_blank" rel="noopener">{{ item_title(idx) }}</a>
           {% if item_tags(idx) %}{% for t in item_tags(idx) %}<span class="tag">{{ t }}</span>{% endfor %}{% endif %}</li>
       {% endfor %}
     </ol>
@@ -80,7 +111,7 @@
       {% set vendor_items = vendor_items() %}
       {% if vendor_items %}
         {% for it in vendor_items %}
-        <li><a href="#item-{{ it.idx }}">#{{ it.idx }} {{ it.title }}</a>
+        <li><a href="{{ item_url(it.idx) }}" target="_blank" rel="noopener">{{ it.title }}</a>
             <span class="imp">{{ stars(it.importance) }}</span>
             {% for c in it.companies %}<span class="tag">{{ c }}</span>{% endfor %}</li>
         {% endfor %}
@@ -107,26 +138,23 @@
   <section>
     <h2>附录：本周新闻清单（{{ items|length }} 条）</h2>
     <table>
-      <thead><tr><th>#</th><th>标题</th><th>来源</th><th>标签</th><th>重要度</th><th>链接</th></tr></thead>
+      <thead><tr><th>#</th><th>标题</th><th>来源</th><th>日期</th><th>标签</th><th>重要度</th><th>链接</th></tr></thead>
       <tbody>
       {% for it in items %}
         <tr id="item-{{ it.idx }}">
           <td>{{ it.idx }}</td>
-          <td>
-            {% if it.summary %}<div><strong>{{ it.title }}</strong></div>
-            <div style="color:#4a5b68;font-size:12px">{{ it.summary }}</div>
-            {% else %}<strong>{{ it.title }}</strong>{% endif %}
-          </td>
-          <td>{{ it.source_name }}<br><span style="color:#7c8b96;font-size:12px">{{ it.published_at }}</span></td>
+          <td><strong>{{ it.title }}</strong></td>
+          <td>{{ it.source_name }}</td>
+          <td>{{ it.published_at or '—' }}</td>
           <td>{% for t in it.tags %}<span class="tag">{{ t }}</span>{% endfor %}</td>
           <td class="imp">{{ it.importance if it.importance else '—' }}</td>
           <td>{% if it.url %}<a href="{{ it.url }}" target="_blank" rel="noopener">原文</a>{% endif %}
-              {% if it.html_file %}<a href="{{ it.html_file }}" title="{{ it.html_file }}">存档</a>{% endif %}</td>
+              {% if it.html_link %}<a href="{{ it.html_link }}" title="{{ it.html_file }}">存档</a>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
-    <p class="footnote">说明：本报告由 newsagent 自动生成，仅限部门内部使用；存档链接为原始网页快照（相对路径，需在 data 目录内打开）。</p>
+    <p class="footnote">说明：本报告由 newsagent 自动生成，仅限部门内部使用；"存档"链接为原始网页快照，可点击直接打开（需保持 reports/ 与 raw/ 目录的相对位置不变）。</p>
   </section>
 </div>
 </body>

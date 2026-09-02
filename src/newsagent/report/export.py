@@ -63,19 +63,38 @@ def to_docx(data: ReportData, path: Path) -> None:
     # 概览
     _heading(doc, "一、本周概览", 1)
     _para(doc, data.overview or "（无）")
+    for pt in data.overview_points:
+        _bullet(doc, "", pt)
     if data.fallback:
         _para(doc, "（说明：本节为自动降级生成，LLM 服务暂不可用）", size=9)
 
+    # 类别分布
+    if data.distribution:
+        _heading(doc, "二、类别分布", 1)
+        table = doc.add_table(rows=1, cols=3)
+        table.style = "Table Grid"
+        for cell, text in zip(table.rows[0].cells, ["类别", "篇数", "占比"]):
+            cell.text = ""
+            _set_cn(cell.paragraphs[0].add_run(text), size=10, bold=True)
+        total = sum(d["count"] for d in data.distribution) or 1
+        for d in data.distribution:
+            row = table.add_row()
+            pct = d["count"] / total * 100
+            for cell, text in zip(row.cells, [d["name"], str(d["count"]),
+                                              f"{pct:.1f}%"]):
+                cell.text = ""
+                _set_cn(cell.paragraphs[0].add_run(text), size=9.5)
+
     # 分主题要点
-    _heading(doc, "二、分主题要点", 1)
+    _heading(doc, "三、分主题要点", 1)
     for t in data.themes:
         _heading(doc, t.get("title", "未命名主题"), 2)
         for it in t.get("items", []):
             title = _item_title(data, it["idx"])
-            _bullet(doc, f"#{it['idx']} {title} —— ", it.get("note", ""))
+            _bullet(doc, title, f"—— {it.get('note', '')}")
 
     # TOP5
-    _heading(doc, "三、本周 TOP 事件", 1)
+    _heading(doc, "四、本周 TOP 事件", 1)
     if data.top5:
         for rank, idx in enumerate(data.top5, 1):
             _para(doc, f"{rank}. {_item_title(data, idx)}")
@@ -83,24 +102,24 @@ def to_docx(data: ReportData, path: Path) -> None:
         _para(doc, "（无）")
 
     # 厂商与集成商动态
-    _heading(doc, "四、厂商与集成商动态", 1)
+    _heading(doc, "五、厂商与集成商动态", 1)
     vendors = [it for it in data.items
                if any(t.startswith("厂商动态") for t in it["tags"]) or it.get("companies")]
     if vendors:
         for it in sorted(vendors, key=lambda x: x.get("importance") or 0, reverse=True):
             companies = "；".join(it.get("companies") or [])
-            _bullet(doc, f"#{it['idx']} {it['title']}",
+            _bullet(doc, it["title"],
                     f"{'（' + companies + '）' if companies else ''}")
     else:
         _para(doc, "（本周没有明显的厂商/集成商动态条目）")
 
     # 趋势与下周关注
-    _heading(doc, "五、趋势观察", 1)
+    _heading(doc, "六、趋势观察", 1)
     for t in data.trends:
         _bullet(doc, "", t)
     if not data.trends:
         _para(doc, "（无）")
-    _heading(doc, "六、下周关注", 1)
+    _heading(doc, "七、下周关注", 1)
     for n in data.next_week:
         _bullet(doc, "", n)
     if not data.next_week:
@@ -108,15 +127,16 @@ def to_docx(data: ReportData, path: Path) -> None:
 
     # 附录清单
     _heading(doc, f"附录：本周新闻清单（{len(data.items)} 条）", 1)
-    table = doc.add_table(rows=1, cols=5)
+    table = doc.add_table(rows=1, cols=6)
     table.style = "Table Grid"
-    headers = ["#", "标题", "来源", "标签", "重要度"]
+    headers = ["#", "标题", "来源", "日期", "标签", "重要度"]
     for cell, text in zip(table.rows[0].cells, headers):
         cell.text = ""
         _set_cn(cell.paragraphs[0].add_run(text), size=10, bold=True)
     for it in data.items:
         row = table.add_row()
         values = [str(it["idx"]), it["title"], it["source_name"],
+                  str(it.get("published_at") or "—"),
                   "/".join(it.get("tags") or []),
                   str(it.get("importance") or "—")]
         for cell, text in zip(row.cells, values):

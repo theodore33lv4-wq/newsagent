@@ -6,6 +6,7 @@ write_report()：本周行数据 → 综述 → 落盘 reports/{week}/weekly-{we
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -32,8 +33,18 @@ def write_report(cfg: Config, provider: LLMProvider, week: str,
         json.dumps(_data_to_dict(data), ensure_ascii=False, indent=1),
         encoding="utf-8")
 
+    # 附录条目附带"存档"相对链接：从 reports/<week>/ 指向 raw/ 快照，
+    # 保证整个 data/ 目录一起移动/部署后链接依然有效
+    render_items = []
+    for it in data.items:
+        r = dict(it)
+        if it.get("html_file"):
+            target = (cfg.data_dir / str(it["html_file"])).resolve()
+            r["html_link"] = os.path.relpath(target, out_dir).replace("\\", "/")
+        render_items.append(r)
+
     html_path = out_dir / f"weekly-{week}.html"
-    html_path.write_text(render_html(data), encoding="utf-8")
+    html_path.write_text(render_html(data, items=render_items), encoding="utf-8")
 
     docx_path = out_dir / f"weekly-{week}.docx"
     to_docx(data, docx_path)
@@ -50,7 +61,9 @@ def _data_to_dict(data: ReportData) -> dict:
         "generated_at": data.generated_at,
         "total_count": data.total_count, "relevant_count": data.relevant_count,
         "source_count": data.source_count,
-        "overview": data.overview, "themes": data.themes, "top5": data.top5,
+        "overview": data.overview, "overview_points": data.overview_points,
+        "distribution": data.distribution,
+        "themes": data.themes, "top5": data.top5,
         "trends": data.trends, "next_week": data.next_week,
         "fallback": data.fallback, "items": data.items,
     }

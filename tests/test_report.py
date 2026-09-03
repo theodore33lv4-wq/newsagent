@@ -23,9 +23,12 @@ ROWS = [
 def test_generate_mock(cfg):
     data = generate(cfg, MockLLMProvider(), "2026-W35", ROWS, "2026-08-26 13:00")
     assert data.themes and not data.fallback
-    # 固定主题：来自标签体系一级分类
+    # 主题 = 确定性复用打标 level-1 标签（数量降序、名称升序）
     titles = [t["title"] for t in data.themes]
-    assert titles == ["车路协同/智能网联", "厂商动态"]
+    assert titles == ["厂商动态", "车路协同/智能网联"]
+    # 每条要点来自 LLM（Mock notes）
+    all_notes = "".join(it["note"] for t in data.themes for it in t["items"])
+    assert "披露中标" in all_notes
     assert data.overview and data.overview_points
     assert all(1 <= i <= 2 for i in data.top5)
     # 类别分布：数量总和 = 条目数
@@ -33,12 +36,27 @@ def test_generate_mock(cfg):
     assert data.distribution[0]["count"] >= data.distribution[-1]["count"]
 
 
-def test_theme_mapping(cfg):
-    from newsagent.report.generator import _map_theme
-    allowed = [n["name"] for n in cfg.taxonomy]
-    assert _map_theme("车路协同", allowed) == "车路协同/智能网联"  # 前缀容错
-    assert _map_theme("政策法规", allowed) == "政策法规"            # 精确
-    assert _map_theme("不存在主题", allowed) == "其他"             # 兜底
+def test_themes_reuse_level1_tags(cfg):
+    """主题直接复用打标 level-1 标签：LLM 完全不允许参与归类（零调用）。"""
+    class NoLLM:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages, **kw):
+            self.calls += 1
+            raise RuntimeError("no llm allowed")
+
+    prov = NoLLM()
+    data = generate(cfg, prov, "2026-W35", ROWS, "now")
+    titles = {t["title"] for t in data.themes}
+    assert titles == {"厂商动态", "车路协同/智能网联"}
+    assert data.fallback is True      # 要点与综述均降级
+    assert prov.calls == 2            # 共 2 次调用（要点+综述）；归类为零调用
+
+    # 主题与附录标签一致（同一条新闻不会出现"归类冲突"）
+    idx2_theme = next(t["title"] for t in data.themes
+                      for it in t["items"] if it["idx"] == 2)
+    assert idx2_theme == "厂商动态"
 
 
 def test_generate_fallback(cfg):

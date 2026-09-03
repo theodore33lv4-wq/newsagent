@@ -128,6 +128,13 @@ class MockLLMProvider(LLMProvider):
                 "companies": ["中控信息", "银江技术"],
                 "importance": 2,
             }, ensure_ascii=False)
+        if "一句要点" in system:
+            return json.dumps({
+                "notes": [
+                    {"idx": 1, "note": "试点城市扩大，车路云示范区扩容。"},
+                    {"idx": 2, "note": "两家集成商披露中标。"},
+                ],
+            }, ensure_ascii=False)
         if "周报综述" in system:
             return json.dumps({
                 "overview": "Mock 综述：本周智能交通领域动态聚焦车路协同与集成商中标。"

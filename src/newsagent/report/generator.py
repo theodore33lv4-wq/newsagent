@@ -1,8 +1,9 @@
-"""综述生成：LLM 两步生成结构化大纲 → ReportData。
+"""综述生成：确定性主题分组 + LLM 要点 + LLM 综述成文 → ReportData。
 
-第一步 主题归纳：把当周条目按主题分组；
-第二步 综述成文：概览 / TOP5 / 趋势观察 / 下周关注。
-任一步失败自动降级（主题按标签分组、TOP5 按重要度），保证综述总能产出。
+- 主题分组：直接复用打标阶段的 level-1 标签（零 LLM 调用、与附录/检索完全一致、跨周可比）；
+- LLM 要点：为每条新闻写"一句话要点"（失败降级为摘要截断）；
+- LLM 综述：概览（含 bullet 要点）/ TOP5 / 趋势观察 / 下周关注（失败自动降级）。
+任一步失败都不会中断周报产出。
 """
 
 from __future__ import annotations
@@ -72,20 +73,15 @@ def build_items(rows: list[dict], summary_max: int) -> list[dict]:
     return items
 
 
-# ---------- 两步 LLM 生成 ----------
-_STEP1_SYSTEM_TMPL = """你是智能交通领域的周报综述助手。第一步任务：把本周新闻条目归纳到【固定主题】中。
-
-主题必须从下面的固定列表中选择（源自标签体系的一级分类，保证跨周一致可比；本周无内容的主题不要输出）：
-{allowed}
+# ---------- LLM 要点 + 综述 ----------
+_NOTES_SYSTEM_TMPL = """你是智能交通领域的周报综述助手。为下面列出的每条新闻写一句要点（不超过 40 字），突出该条本周最值得关注之处。
 
 只输出一个 JSON 对象，格式：
-{{"themes": [{{"title": "固定主题名", "items": [{{"idx": 1, "note": "一句话要点"}}, ...]}}, ...]}}
+{{"notes": [{{"idx": 1, "note": "一句话要点"}}, ...]}}
 
-要求：
-- title 只能使用上面列表中的名称，不得自行创造主题名；
-- 每条新闻必须恰好归入一个主题（idx 为给出的条目编号）；note 不超过 40 字。"""
+要求：覆盖全部 idx；note 不超过 40 字。"""
 
-_STEP2_SYSTEM_TMPL = """你是智能交通领域的周报综述助手。第二步任务：基于主题分组撰写综述。
+_STEP2_SYSTEM_TMPL = """你是智能交通领域的周报综述助手。综述成文任务：基于下面的主题分组撰写综述。
 
 只输出一个 JSON 对象，格式：
 {{"overview": "约 {overview_chars} 字的本周整体概览，全面覆盖主要主题并突出重点",
@@ -124,76 +120,109 @@ def generate(cfg: Config, provider: LLMProvider, week: str,
         data.overview = "本周没有符合条件的新闻条目。"
         return data
 
-    data.distribution = _distribution(items)
+    data.distribution = _distribution(items, _level1_names(cfg))
 
-    # 第一步：主题归纳
-    themes = _step1_themes(cfg, provider, items)
-    # 第二步：综述成文
+    # 主题分组（确定性，复用打标 level-1 标签）+ LLM 写要点
+    themes, notes_ok = _build_themes(cfg, provider, items)
+    data.themes = themes
+
+    # LLM 综述成文
     overview_chars = int(c.get("overview_chars", 250))
     points_count = int(c.get("overview_points_count", 5))
     overview, overview_points, top5, trends, next_week = _step2_compose(
         cfg, provider, items, themes, overview_chars, points_count)
 
-    if themes:
-        data.themes = themes
-    else:
-        data.themes = _fallback_themes(items)
-        data.fallback = True
     data.overview = overview or _fallback_overview(items)
-    data.overview_points = overview_points or _fallback_points(items, points_count)
+    data.overview_points = overview_points or _fallback_points(
+        items, points_count, _level1_names(cfg))
     data.top5 = _valid_indices(top5, items)
     data.trends = _str_list(trends)
     data.next_week = _str_list(next_week)
+    data.fallback = (not notes_ok) or (overview is None)
     return data
 
 
-def _step1_themes(cfg: Config, provider: LLMProvider,
-                  items: list[dict]) -> list[dict]:
-    allowed = [str(n.get("name", "")).strip() for n in cfg.taxonomy
-               if str(n.get("name", "")).strip()]
-    system = _STEP1_SYSTEM_TMPL.format(allowed="\n".join(f"- {a}" for a in allowed))
+# ---------- 主题分组（确定性） ----------
+def _level1_names(cfg: Config) -> list[str]:
+    """标签体系的一级分类名（可能是"车路协同/智能网联"这种含斜杠的名字）。"""
+    return [str(n.get("name", "")).strip() for n in cfg.taxonomy
+            if str(n.get("name", "")).strip()]
+
+
+def _level1_of(tags: list[str], nodes: list[str]) -> str:
+    """标签路径 → 一级分类名。
+
+    优先全等匹配（标签恰好是一级名，如"车路协同/智能网联"），
+    再按"一级名/二级名"前缀匹配（如"厂商动态/集成商动态"），认不出兜底"其他"。
+    """
+    for t in tags or []:
+        t = str(t).strip()
+        for name in nodes:
+            if t == name or t.startswith(name + "/"):
+                return name
+    return "其他"
+
+
+def _group_by_level1(items: list[dict], nodes: list[str]) -> list[dict]:
+    """直接复用打标的 level-1 标签分组（与附录标签、检索接口完全一致）。
+
+    返回 [{title, items:[{idx, note(摘要兜底)}]}]，主题按 数量降序 → 名称升序。
+    """
+    groups: dict[str, list[dict]] = {}
+    for it in items:
+        key = _level1_of(it.get("tags"), nodes)
+        groups.setdefault(key, []).append(it)
+    ordered = sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+    return [{"title": title,
+             "items": [{"idx": it["idx"], "note": _truncate(it["summary"], 40)}
+                       for it in sub]}
+            for title, sub in ordered]
+
+
+def _build_themes(cfg: Config, provider: LLMProvider,
+                  items: list[dict]) -> tuple[list[dict], bool]:
+    """主题 = 确定性分组；要点 note 由 LLM 补充（失败用摘要兜底）。
+
+    返回 (themes, notes_ok)。
+    """
+    themes = _group_by_level1(items, _level1_names(cfg))
+    notes = _notes_for_items(cfg, provider, items)
+    if notes:
+        for t in themes:
+            for sub in t["items"]:
+                sub["note"] = notes.get(sub["idx"], sub["note"])
+        return themes, True
+    return themes, False
+
+
+def _notes_for_items(cfg: Config, provider: LLMProvider,
+                     items: list[dict]) -> Optional[dict[int, str]]:
     listing = "\n".join(f"{it['idx']}. {it['title']}（{it['source_name']}）"
                         f"{' / ' + '/'.join(it['tags']) if it['tags'] else ''}"
                         f" {it['summary']}" for it in items)
     messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": f"以下是本周新闻条目：\n{listing}"},
+        {"role": "system", "content": _NOTES_SYSTEM_TMPL},
+        {"role": "user", "content": f"本周新闻条目：\n{listing}"},
     ]
     try:
         raw = provider.chat(messages, json_mode=True, model=cfg.report_model)
         data = extract_json(raw)
         if not data:
-            return []
-        themes = []
-        for t in data.get("themes") or []:
-            title = _map_theme(_str(t.get("title")), allowed)
-            if not title:
+            logger.warning("要点生成未返回有效 JSON")
+            return None
+        out: dict[int, str] = {}
+        for n in data.get("notes") or []:
+            try:
+                idx = int(n.get("idx"))
+            except (TypeError, ValueError):
                 continue
-            sub = []
-            for it in (t.get("items") or []):
-                try:
-                    idx = int(it.get("idx"))
-                except (TypeError, ValueError):
-                    continue
-                sub.append({"idx": idx, "note": _truncate(_str(it.get("note")), 60)})
-            if sub:
-                themes.append({"title": title, "items": sub})
-        return themes
+            note = _str(n.get("note"))
+            if note:
+                out[idx] = _truncate(note, 60)
+        return out or None
     except Exception as exc:
-        logger.warning("主题归纳失败，将按标签降级分组: {}", exc)
-        return []
-
-
-def _map_theme(name: str, allowed: list[str]) -> Optional[str]:
-    """LLM 返回的主题名 → 固定列表内的主题名（前缀/子串容错，兜底"其他"）。"""
-    if not name:
+        logger.warning("要点生成失败，将使用摘要作为要点: {}", exc)
         return None
-    if name in allowed:
-        return name
-    for a in allowed:
-        if a.startswith(name) or name.startswith(a):
-            return a
-    return "其他" if "其他" in allowed else None
 
 
 def _step2_compose(cfg: Config, provider: LLMProvider, items: list[dict],
@@ -228,11 +257,11 @@ def _step2_compose(cfg: Config, provider: LLMProvider, items: list[dict],
 
 
 # ---------- 类别分布与降级 ----------
-def _distribution(items: list[dict]) -> list[dict]:
+def _distribution(items: list[dict], nodes: list[str]) -> list[dict]:
     """按一级标签统计类别分布：[{name, count, pct}]，pct 相对最大类（100%）。"""
     counts: dict[str, int] = {}
     for it in items:
-        key = (it["tags"][0] if it["tags"] else "其他").split("/")[0]
+        key = _level1_of(it.get("tags"), nodes)
         counts[key] = counts.get(key, 0) + 1
     if not counts:
         return []
@@ -243,20 +272,6 @@ def _distribution(items: list[dict]) -> list[dict]:
     return dist
 
 
-def _fallback_themes(items: list[dict]) -> list[dict]:
-    """按一级标签分组的兜底主题归纳。"""
-    groups: dict[str, list[dict]] = {}
-    for it in items:
-        key = (it["tags"][0] if it["tags"] else "其他").split("/")[0]
-        groups.setdefault(key, []).append(it)
-    themes = []
-    for title, sub in groups.items():
-        themes.append({"title": title,
-                       "items": [{"idx": it["idx"],
-                                  "note": _truncate(it["summary"], 40)} for it in sub]})
-    return themes
-
-
 def _fallback_overview(items: list[dict]) -> str:
     vendors = sum(1 for it in items if any(t.startswith("厂商动态") for t in it["tags"]))
     return (f"本周共收录 {len(items)} 条智能交通相关新闻，"
@@ -264,10 +279,10 @@ def _fallback_overview(items: list[dict]) -> str:
             f"（自动降级生成：LLM 不可用时的概览）")
 
 
-def _fallback_points(items: list[dict], n: int) -> list[str]:
+def _fallback_points(items: list[dict], n: int, nodes: list[str]) -> list[str]:
     """LLM 不可用时的兜底要点：按类别分布生成。"""
     return [f"{d['name']}：{d['count']} 条"
-            for d in _distribution(items)[: max(0, n)]]
+            for d in _distribution(items, nodes)[: max(0, n)]]
 
 
 def _valid_indices(top5: list[int], items: list[dict]) -> list[int]:

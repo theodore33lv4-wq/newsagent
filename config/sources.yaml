@@ -1,12 +1,15 @@
 # 新闻源配置（全部为国内源）
 # 类型说明：
-#   sohu_account : 搜狐号作者主页（ITS114 等，核心源；解析主页内嵌 JSON，已实测可用）
-#   rss          : RSS 订阅
+#   sohu_account : 搜狐号作者主页（ITS114、智能交通技术 等；解析主页内嵌 JSON，已实测可用）
+#   rss          : RSS 订阅（feedparser）
 #   website      : 固定站点抓取（list_url 列表页 + article_selector 文章链接选择器）
 #
-# 探测记录（2026-08）：
+# 探测记录：
 #   - its114 官网 www.its114.com：SSL 连接被阻断 → 停用，以搜狐号为主
-#   - 赛文交通网 7its.com/7its.cn：小鹅通 SPA，静态采集不可行 → 停用，待方案
+#   - 赛文交通网 7its：改版后列表页 SSR 可用（index.php?m=home&c=Lists&a=index&tid=5，31 篇/页）→ 已接入
+#   - 工信部频道列表页为 JS 渲染 → 改用首页（政策/公告链接 SSR，a[href*='/art/']）
+#   - 中国政府网政策库 403 反爬、公安部 122/mps 无 SSR → 停用
+#   - 盖世汽车：频道页 JS 渲染，但官方 RSS 可用（ClassRss.aspx?ClassId=409=前沿技术，100 条/feed）→ 已接入
 #   - 中国政府采购网 search.ccgp.gov.cn：反爬（无结果链接）→ 停用
 #   - 必应中文搜索：结果质量不稳定（常返回无关英文结果）→ search.enabled=false
 
@@ -20,6 +23,15 @@ sources:
     profile_url: "https://mp.sohu.com/profile?xpt=aXRzMTE0QHNvaHUuY29t"
     limit: 40
 
+  - id: its_tech_sohu
+    name: 智能交通技术（搜狐号，行业技术角度）
+    type: sohu_account
+    enabled: true
+    account: "智能交通技术"
+    xpt: "aXRzdGVjaEBzb2h1LmNvbQ=="       # 来自 https://www.sohu.com/a/812630800_468661
+    profile_url: "https://mp.sohu.com/profile?xpt=aXRzdGVjaEBzb2h1LmNvbQ=="
+    limit: 40
+
   - id: mot_news
     name: 交通运输部·交通要闻（政策类）
     type: website
@@ -28,6 +40,47 @@ sources:
     list_url: https://www.mot.gov.cn/xinwen/jiaotongyaowen/index.html
     article_selector: "a[href*='t2026']"   # 实测：文章链接形如 .../202608/t20260826_4223213.html
     limit: 25
+
+  - id: miit_policy
+    name: 工信部·政策与公告（首页精选）
+    type: website
+    enabled: true
+    base_url: https://www.miit.gov.cn
+    list_url: https://www.miit.gov.cn/
+    article_selector: "a[href*='/art/']"   # 实测：政策/公告链接形如 .../zwgk/zcwj/.../art/2026/art_xxx.html
+    limit: 15
+
+  - id: zgjtb_news
+    name: 中国交通新闻网（中国交通报）
+    type: website
+    enabled: true
+    base_url: https://www.zgjtb.com
+    list_url: https://www.zgjtb.com/
+    article_selector: "a[href*='content_']"  # 实测：文章链接形如 /2026-08/21/content_533849.html
+    limit: 30
+
+  - id: 7its_news
+    name: 赛文交通网·资讯（集成商内容密集）
+    type: website
+    enabled: true
+    base_url: https://www.7its.com
+    list_url: "https://www.7its.com/index.php?m=home&c=Lists&a=index&tid=5"
+    article_selector: "a[href*='c=View']"    # 实测：文章链接形如 ?m=home&c=View&a=index&aid=32199
+    limit: 30
+
+  - id: gasgoo_tech
+    name: 盖世汽车·前沿技术（智能网联/汽车电子，RSS）
+    type: rss
+    enabled: true
+    url: "https://auto.gasgoo.com/Rss/ClassRss.aspx?ClassId=409"
+    limit: 20
+
+  - id: gasgoo_news
+    name: 盖世汽车·综合（备选，含智能驾驶话题，RSS）
+    type: rss
+    enabled: false
+    url: "https://auto.gasgoo.com/Rss/ClassRss.aspx?ClassId=501"
+    limit: 20
 
   # ---- 已探测、暂不可用的源（保留配置便于日后启用） ----
   - id: its114_www
@@ -38,13 +91,3 @@ sources:
     list_url: https://www.its114.com/
     article_selector: "a"
     limit: 30
-
-  - id: 7its
-    name: 赛文交通网（小鹅通 SPA，暂不可用）
-    type: website
-    enabled: false
-    base_url: https://www.7its.cn
-    list_url: https://www.7its.cn/news/
-    article_selector: "a"
-    limit: 30
-

@@ -36,6 +36,17 @@ def iso_week(dt: datetime | date | None = None, tz_name: str | None = None) -> s
     return f"{iso.year}-W{iso.week:02d}"
 
 
+def target_week(dt: datetime | date | None = None, tz_name: str | None = None) -> str:
+    """目标周：'每周一生成上周周报'口径。
+
+    = 今天减 7 天所在的 ISO 周。无论一周内哪天运行，都稳定落在同一个
+    '上一个完整周'（周一 8:30 运行 → 上周；周日补跑 → 仍是上周），跨周可比。
+    """
+    if dt is None:
+        dt = now_local(tz_name)
+    return iso_week(dt - timedelta(days=7), tz_name)
+
+
 def week_range(week: str, tz_name: str | None = None) -> tuple[datetime, datetime]:
     """周编号 → (周一 00:00, 周日 23:59:59)（本地时区 aware datetime）。"""
     import re

@@ -21,7 +21,7 @@ from .collect import build_collectors, gather_all
 from .collect.dedup import DedupChecker
 from .report import write_report
 from .utils.config import Config
-from .utils.dates import iso_week
+from .utils.dates import target_week
 from .utils.logging import setup_logging
 from .utils.notify import notify_failure
 
@@ -48,7 +48,7 @@ class RunStats:
 def run_pipeline(cfg: Config, *, week: str | None = None, limit: int | None = None,
                  dry_run: bool = False, regen: bool = False,
                  provider: LLMProvider | None = None) -> RunStats:
-    week = week or iso_week(None, cfg.app.get("timezone"))
+    week = week or target_week(None, cfg.app.get("timezone"))
     run_tag = f"{week}-dryrun" if dry_run else week
     setup_logging(cfg.data_dir, run_tag)
 

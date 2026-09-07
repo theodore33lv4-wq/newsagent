@@ -64,7 +64,9 @@ def _data_to_dict(data: ReportData) -> dict:
         "overview": data.overview, "overview_points": data.overview_points,
         "distribution": data.distribution,
         "themes": data.themes, "top5": data.top5,
-        "trends": data.trends, "next_week": data.next_week,
+        "trends_macro": data.trends_macro, "trends_projects": data.trends_projects,
+        "trends_vendor": data.trends_vendor,
+        "next_week": data.next_week,
         "fallback": data.fallback, "items": data.items,
     }
 

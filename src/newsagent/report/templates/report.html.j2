@@ -123,8 +123,17 @@
 
   <section>
     <h2>趋势观察</h2>
+    <h3>宏观市场动态</h3>
     <ul class="trends">
-      {% for t in trends %}<li>{{ t }}</li>{% else %}<li>（无）</li>{% endfor %}
+      {% for t in trends_macro %}<li>{{ t }}</li>{% else %}<li>（无）</li>{% endfor %}
+    </ul>
+    <h3>重点工程与项目</h3>
+    <ul class="trends">
+      {% for t in trends_projects %}<li>{{ t }}</li>{% else %}<li>（无）</li>{% endfor %}
+    </ul>
+    <h3>集成商产品规划建议</h3>
+    <ul class="trends">
+      {% for t in trends_vendor %}<li>{{ t }}</li>{% else %}<li>（无）</li>{% endfor %}
     </ul>
   </section>
 

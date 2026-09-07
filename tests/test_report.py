@@ -26,11 +26,14 @@ def test_generate_mock(cfg):
     # 主题 = 确定性复用打标 level-1 标签（数量降序、名称升序）
     titles = [t["title"] for t in data.themes]
     assert titles == ["厂商动态", "车路协同/智能网联"]
-    # 每条要点来自 LLM（Mock notes）
+    # 每条要点来自 LLM（Mock notes），要求 30-80 字双层次
     all_notes = "".join(it["note"] for t in data.themes for it in t["items"])
     assert "披露中标" in all_notes
+    assert len(all_notes.split("，")[0]) >= 10
     assert data.overview and data.overview_points
     assert all(1 <= i <= 2 for i in data.top5)
+    # 趋势观察结构化为三块
+    assert data.trends_macro and data.trends_projects and data.trends_vendor
     # 类别分布：数量总和 = 条目数
     assert sum(d["count"] for d in data.distribution) == len(data.items)
     assert data.distribution[0]["count"] >= data.distribution[-1]["count"]
@@ -77,6 +80,7 @@ def test_render_html(cfg):
     assert "智能交通新闻周报" in html
     assert "类别分布" in html                      # 可视化章节
     assert "厂商与集成商动态" in html
+    assert "宏观市场动态" in html and "重点工程与项目" in html and "集成商产品规划建议" in html
     assert "附录" in html
     assert "车路云" in html
     # 主题要点/厂商区链接改为原文 URL（不再指向附录锚点）

@@ -115,9 +115,20 @@ def to_docx(data: ReportData, path: Path) -> None:
 
     # 趋势与下周关注
     _heading(doc, "六、趋势观察", 1)
-    for t in data.trends:
+    _heading(doc, "6.1 宏观市场动态", 2)
+    for t in data.trends_macro:
         _bullet(doc, "", t)
-    if not data.trends:
+    if not data.trends_macro:
+        _para(doc, "（无）")
+    _heading(doc, "6.2 重点工程与项目", 2)
+    for t in data.trends_projects:
+        _bullet(doc, "", t)
+    if not data.trends_projects:
+        _para(doc, "（无）")
+    _heading(doc, "6.3 集成商产品规划建议", 2)
+    for t in data.trends_vendor:
+        _bullet(doc, "", t)
+    if not data.trends_vendor:
         _para(doc, "（无）")
     _heading(doc, "七、下周关注", 1)
     for n in data.next_week:

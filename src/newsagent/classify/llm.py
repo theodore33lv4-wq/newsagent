@@ -128,11 +128,11 @@ class MockLLMProvider(LLMProvider):
                 "companies": ["中控信息", "银江技术"],
                 "importance": 2,
             }, ensure_ascii=False)
-        if "一句要点" in system:
+        if "一句话要点" in system:
             return json.dumps({
                 "notes": [
-                    {"idx": 1, "note": "试点城市扩大，车路云示范区扩容。"},
-                    {"idx": 2, "note": "两家集成商披露中标。"},
+                    {"idx": 1, "note": "车路云一体化试点扩容，多地公布建设进度，反映试点进入常态化阶段。"},
+                    {"idx": 2, "note": "两家集成商披露中标信号控制项目，金额显著，反映交管市场招标节奏加快。"},
                 ],
             }, ensure_ascii=False)
         if "周报综述" in system:
@@ -150,7 +150,11 @@ class MockLLMProvider(LLMProvider):
                     {"title": "厂商动态", "items": [{"idx": 2, "note": "两家集成商中标。"}]},
                 ],
                 "top5": [1, 2],
-                "trends": ["车路云一体化试验扩大"],
+                "trends": {
+                    "macro": ["智能交通投资持续增长，试点城市扩容。", "政策导向由单点建设转向规模化应用。"],
+                    "projects": ["某市车路云示范区二期开工。", "高速公路改扩建机电项目密集招标。"],
+                    "vendor_advice": ["集成商应加快车路云产品线储备。", "建议布局信号控制AI优化方向。"],
+                },
                 "next_week": ["关注新一批试点名单"],
             }, ensure_ascii=False)
         return json.dumps({"ok": True}, ensure_ascii=False)

@@ -36,7 +36,9 @@ class ReportData:
     distribution: list[dict] = field(default_factory=list)    # 类别分布 [{name,count,pct}]
     themes: list[dict] = field(default_factory=list)   # {title, items:[{idx,note}]}
     top5: list[int] = field(default_factory=list)
-    trends: list[str] = field(default_factory=list)
+    trends_macro: list[str] = field(default_factory=list)     # 趋势·宏观市场动态
+    trends_projects: list[str] = field(default_factory=list)  # 趋势·重点工程与项目
+    trends_vendor: list[str] = field(default_factory=list)    # 趋势·集成商产品规划建议
     next_week: list[str] = field(default_factory=list)
     items: list[dict] = field(default_factory=list)    # 附录清单
     fallback: bool = False                              # 是否走降级生成
@@ -74,27 +76,34 @@ def build_items(rows: list[dict], summary_max: int) -> list[dict]:
 
 
 # ---------- LLM 要点 + 综述 ----------
-_NOTES_SYSTEM_TMPL = """你是智能交通领域的周报综述助手。为下面列出的每条新闻写一句要点（不超过 40 字），突出该条本周最值得关注之处。
+_NOTES_SYSTEM_TMPL = """你是智能交通领域的周报综述助手。为下面列出的每条新闻写一句话要点，突出该条本周最值得关注之处。
 
 只输出一个 JSON 对象，格式：
 {{"notes": [{{"idx": 1, "note": "一句话要点"}}, ...]}}
 
-要求：覆盖全部 idx；note 不超过 40 字。"""
+要求：
+- 覆盖全部 idx；
+- note 长度 30-80 字，应包含【核心事实】+【本周意义】两个层次（如"XX 中标 XX 项目（金额/规模），反映……动向"）；
+- 避免空泛评价（如"具有重要意义"），多写具体事实与信号。"""
 
 _STEP2_SYSTEM_TMPL = """你是智能交通领域的周报综述助手。综述成文任务：基于下面的主题分组撰写综述。
 
 只输出一个 JSON 对象，格式：
 {{"overview": "约 {overview_chars} 字的本周整体概览，全面覆盖主要主题并突出重点",
- "overview_points": ["要点1，不超过40字", ...],
+ "overview_points": ["要点1，20-40字", ...],
  "top5": [idx, idx, ...],
- "trends": ["趋势观察1", ...],
- "next_week": ["下周关注1", ...]}}
+ "trends": {{"macro": ["宏观市场动态1，20-40字", ...],
+             "projects": ["重要工程/项目1，20-40字", ...],
+             "vendor_advice": ["集成商产品规划建议1，20-40字", ...]}},
+ "next_week": ["下周关注1，20-40字", ...]}}
 
 要求：
 - overview {overview_chars} 字左右：概括本周整体态势（政策动向、技术进展、产业与厂商动态、城市与地方实践）并突出重点；
-- overview_points 给出 {points_count} 条结构化的本周要点，每条不超过 40 字，可注明所属主题（如“政策：…”“厂商：…”）；
+- overview_points 给出 {points_count} 条结构化的本周要点，每条 20-40 字，可注明所属主题（如“政策：…”“厂商：…”）；
 - top5 为本周最重要的 5 条新闻 idx（按重要性排序，从给出的条目中选择）；
-- trends 2-4 条，概括本周行业趋势（如技术路线、政策走向、厂商动态）；
+- trends.macro：2-4 条智能交通市场宏观动态（行业规模/政策导向/投资风向/技术演进等）；
+- trends.projects：2-4 条本周重要工程与项目（如重大中标、试点落地、示范工程启动，尽量点出项目名称与承担方）；
+- trends.vendor_advice：2-4 条面向智能交通集成商的产品规划建议（结合本周信息给出方向性建议，如产品线重点、技术储备、市场切入点）；
 - next_week 1-3 条，下周值得关注的方向。"""
 
 
@@ -129,14 +138,16 @@ def generate(cfg: Config, provider: LLMProvider, week: str,
     # LLM 综述成文
     overview_chars = int(c.get("overview_chars", 250))
     points_count = int(c.get("overview_points_count", 5))
-    overview, overview_points, top5, trends, next_week = _step2_compose(
-        cfg, provider, items, themes, overview_chars, points_count)
+    overview, overview_points, top5, t_macro, t_projects, t_vendor, next_week = \
+        _step2_compose(cfg, provider, items, themes, overview_chars, points_count)
 
     data.overview = overview or _fallback_overview(items)
     data.overview_points = overview_points or _fallback_points(
         items, points_count, _level1_names(cfg))
     data.top5 = _valid_indices(top5, items)
-    data.trends = _str_list(trends)
+    data.trends_macro = _str_list(t_macro)
+    data.trends_projects = _str_list(t_projects)
+    data.trends_vendor = _str_list(t_vendor)
     data.next_week = _str_list(next_week)
     data.fallback = (not notes_ok) or (overview is None)
     return data
@@ -218,7 +229,7 @@ def _notes_for_items(cfg: Config, provider: LLMProvider,
                 continue
             note = _str(n.get("note"))
             if note:
-                out[idx] = _truncate(note, 60)
+                out[idx] = _truncate(note, 80)
         return out or None
     except Exception as exc:
         logger.warning("要点生成失败，将使用摘要作为要点: {}", exc)
@@ -228,7 +239,7 @@ def _notes_for_items(cfg: Config, provider: LLMProvider,
 def _step2_compose(cfg: Config, provider: LLMProvider, items: list[dict],
                    themes: list[dict], overview_chars: int,
                    points_count: int) -> tuple[Optional[str], list[str], list[int],
-                                               list[str], list[str]]:
+                                               list[str], list[str], list[str], list[str]]:
     theme_text = "\n".join(
         f"## {t['title']}\n" + "\n".join(f"- {it['idx']}. {it['note']}" for it in t["items"])
         for t in themes) or "（无主题分组）"
@@ -242,18 +253,29 @@ def _step2_compose(cfg: Config, provider: LLMProvider, items: list[dict],
         raw = provider.chat(messages, json_mode=True, model=cfg.report_model)
         data = extract_json(raw)
         if not data:
-            return None, [], [], [], []
+            return None, [], [], [], [], [], []
         top5 = []
         for idx in (data.get("top5") or []):
             try:
                 top5.append(int(idx))
             except (TypeError, ValueError):
                 continue
+        t_macro, t_projects, t_vendor = _parse_trends(data.get("trends"))
         return (_str(data.get("overview")), _str_list(data.get("overview_points"))[:points_count],
-                top5, _str_list(data.get("trends")), _str_list(data.get("next_week")))
+                top5, t_macro, t_projects, t_vendor, _str_list(data.get("next_week")))
     except Exception as exc:
         logger.warning("综述成文失败，使用降级内容: {}", exc)
-        return None, [], [], [], []
+        return None, [], [], [], [], [], []
+
+
+def _parse_trends(v) -> tuple[list[str], list[str], list[str]]:
+    """解析趋势字段：新格式为 dict{macro,projects,vendor_advice}；兼容旧格式 list。"""
+    if isinstance(v, dict):
+        return (_str_list(v.get("macro")), _str_list(v.get("projects")),
+                _str_list(v.get("vendor_advice") or v.get("vendor")))
+    if isinstance(v, list):
+        return _str_list(v), [], []
+    return [], [], []
 
 
 # ---------- 类别分布与降级 ----------

@@ -152,6 +152,16 @@ def run_pipeline(cfg: Config, *, week: str | None = None, limit: int | None = No
         stats.report_paths = {}
         logger.warning("本周无相关条目，未生成综述")
 
+    # ---------- 周报推送（可选：钉钉工作通知给个人） ----------
+    if cfg.notify.get("push_weekly") and stats.report_paths.get("html_path"):
+        from .utils.dingtalk import push_weekly_report
+        from .utils.dates import week_label_cn
+        push_weekly_report(
+            cfg, stats.report_paths["html_path"],
+            title=f"智能交通新闻周报 {week}",
+            subtitle=week_label_cn(week, cfg.app.get("timezone")),
+        )
+
     # ---------- 汇总与告警 ----------
     logger.info("===== 流水线结束：候选 {} / 新条目 {} / 存档成功 {} / 失败 {} / "
                 "分类 {} / 相关 {} / 厂商动态 {} / 综述 {} =====",

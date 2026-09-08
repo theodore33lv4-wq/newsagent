@@ -45,3 +45,9 @@ report:
 notify:
   enabled: false                 # 失败告警（企业微信/钉钉/飞书群机器人）
   webhook_url_env: NOTIFY_WEBHOOK_URL
+  push_weekly: false             # 周报生成后自动推送（钉钉工作通知，个人）
+  dingtalk:                      # 钉钉内部应用（企业开放平台创建）
+    agent_id_env: DINGTALK_AGENT_ID      # 应用 AgentId
+    app_key_env: DINGTALK_APP_KEY        # 应用 AppKey
+    app_secret_env: DINGTALK_APP_SECRET  # 应用 AppSecret
+    userids_env: DINGTALK_USERIDS        # 收件人 userid，逗号分隔

@@ -40,7 +40,7 @@ class DingTalkClient:
     def get_token(self) -> str:
         if self._token and time.time() < self._token_expire_at - 60:
             return self._token
-        resp = httpx.post(f"{_API}/gettoken", params={
+        resp = httpx.get(f"{_API}/gettoken", params={
             "appkey": self.app_key, "appsecret": self.app_secret,
         }, timeout=self.timeout)
         data = _check(resp, "gettoken")

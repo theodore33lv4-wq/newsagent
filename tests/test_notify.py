@@ -53,11 +53,11 @@ def test_dingtalk_client_token_cache(monkeypatch):
         def json(self):
             return {"errcode": 0, "access_token": "tok-1", "expires_in": 7200}
 
-    def fake_post(url, **kw):
+    def fake_get(url, **kw):
         calls["n"] += 1
         return FakeResp()
 
-    monkeypatch.setattr("newsagent.utils.dingtalk.httpx.post", fake_post)
+    monkeypatch.setattr("newsagent.utils.dingtalk.httpx.get", fake_get)
     client = DingTalkClient("k", "s")
     assert client.get_token() == "tok-1"
     assert client.get_token() == "tok-1"   # 命中缓存

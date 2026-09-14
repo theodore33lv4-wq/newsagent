@@ -163,7 +163,7 @@ class MockLLMProvider(LLMProvider):
 def create_provider(cfg: Config) -> LLMProvider:
     """按配置创建 LLM Provider（provider 一行切换）。"""
     name = cfg.llm.get("provider", "mock")
-    model = cfg.llm.get("model", "deepseek-chat")
+    model = cfg.llm.get("model", "deepseek-flash")
     temperature = float(cfg.llm.get("temperature", 0.2))
     timeout = float(cfg.llm.get("timeout_seconds", 120))
     max_retries = int(cfg.llm.get("max_retries", 2))

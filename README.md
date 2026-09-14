@@ -152,7 +152,7 @@ git pull
 
 ## 五、配置要点
 
-**`config.yaml`**：`llm.provider` 与 `llm.model`（DeepSeek 模型名为全小写，如 `deepseek-v4-flash-vision-exp`）、`collect.*`（并发数、超时、采集节流）、`classify.*`（打标并行数、厂商重要度下限）、`report.*`（概览字数、要点条数、输入条数上限）、`notify.*`（异常告警与周报推送开关）。
+**`config.yaml`**：`llm.provider` 与 `llm.model`（DeepSeek 官方模型名为全小写，如 `deepseek-flash`、`deepseek-v4-pro`）、`collect.*`（并发数、超时、采集节流）、`classify.*`（打标并行数、厂商重要度下限）、`report.*`（概览字数、要点条数、输入条数上限）、`notify.*`（异常告警与周报推送开关）。
 
 **`sources.yaml`**：支持三种源类型 —— `sohu_account`（填 `profile_url` 与 `xpt`）、`website`（填 `list_url` 与 `article_selector`）、`rss`（填 `url`）。新增源只需追加一条并设置 `enabled: true`。文件顶部记录了各站点的实测结论，说明哪些渠道可用、哪些受限及原因。
 

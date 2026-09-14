@@ -24,6 +24,7 @@ from .downloader import FetchedContent
 
 _STATUS_NEW = "archived"          # 已存档，待分类
 _STATUS_CLASSIFIED = "classified" # 已分类索引
+_STATUS_FILTERED = "filtered"     # 已过滤（非新闻页 / 不在目标周 / 无日期）
 
 
 def guid_for(url: str) -> str:
@@ -92,8 +93,15 @@ class Store:
 
     # ---------- 保存 ----------
     def save_article(self, week: str, article: Article,
-                     content: FetchedContent) -> Optional[dict]:
-        """落盘快照/正文并写入索引。URL 已存在 → 返回 None（调用方视为重复）。"""
+                     content: FetchedContent, *, status: str = _STATUS_NEW,
+                     note: str | None = None,
+                     published_iso: str | None = None) -> Optional[dict]:
+        """落盘快照/正文并写入索引。
+
+        - status：archived（待分类）/ filtered（页面体检未通过或不在目标周）
+        - published_iso：页面抽取或列表层解析出的发布日期（优先于采集层）
+        URL 已存在 → 返回 None（调用方视为重复）。
+        """
         ukey = url_key(article.url)
         with self._connect() as conn:
             dup = conn.execute("SELECT 1 FROM articles WHERE url_key=?", (ukey,)).fetchone()
@@ -112,13 +120,14 @@ class Store:
         text = content.text
         chash = content_key(text) if text else None
         fetched_at = datetime.now(timezone.utc).isoformat()
-        published_at = _to_iso(article.published_at)
+        published_at = published_iso or _to_iso(article.published_at)
+        title = _clean_title(content.meta_title) or article.title
 
         record = {
             "guid": guid, "week": week,
             "url": article.url, "url_key": ukey,
-            "title": _clean_title(content.meta_title) or article.title,
-            "title_key": title_key(_clean_title(content.meta_title) or article.title),
+            "title": title,
+            "title_key": title_key(title),
             "source_id": article.source_id, "source_name": article.source_name,
             "published_at": published_at,
             "fetched_at": fetched_at,
@@ -127,8 +136,8 @@ class Store:
             "text_chars": len(text) if text else 0,
             "content_hash": chash,
             "extractor": content.extractor,
-            "status": _STATUS_NEW,
-            "note": None if text else "正文待人工（提取失败，保留快照）",
+            "status": status,
+            "note": note or (None if text else "正文待人工（提取失败，保留快照）"),
         }
 
         art_json = {
@@ -153,19 +162,37 @@ class Store:
                               tags: list[str], summary: str | None,
                               keywords: list[str] | None,
                               companies: list[str] | None,
-                              importance: int | None, note: str | None = None) -> None:
+                              importance: int | None, note: str | None = None,
+                              published_iso: str | None = None) -> None:
         with self._connect() as conn:
             conn.execute(
                 """UPDATE articles SET status=?, relevance=?, tags_json=?, summary=?,
-                   keywords_json=?, companies_json=?, importance=?, note=COALESCE(?, note)
+                   keywords_json=?, companies_json=?, importance=?, note=COALESCE(?, note),
+                   published_at=COALESCE(?, published_at)
                    WHERE guid=?""",
                 (_STATUS_CLASSIFIED, relevance,
                  json.dumps(tags or [], ensure_ascii=False),
                  summary,
                  json.dumps(keywords or [], ensure_ascii=False),
                  json.dumps(companies or [], ensure_ascii=False),
-                 importance, note, guid),
+                 importance, note, published_iso, guid),
             )
+
+    def mark_filtered(self, guid: str, reason: str) -> None:
+        """标记为已过滤（页面体检未通过 / 日期不在目标周 / 无日期）。
+
+        仍保留记录与快照，便于审计；relevance=0 保证其不会进入周报。
+        """
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE articles SET status=?, relevance=0, note=? WHERE guid=?",
+                (_STATUS_FILTERED, f"已过滤：{reason}", guid),
+            )
+
+    def set_published(self, guid: str, published_iso: str) -> None:
+        with self._connect() as conn:
+            conn.execute("UPDATE articles SET published_at=? WHERE guid=?",
+                         (published_iso, guid))
 
     def set_note(self, guid: str, note: str) -> None:
         with self._connect() as conn:

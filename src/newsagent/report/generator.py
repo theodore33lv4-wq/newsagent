@@ -1,9 +1,8 @@
-"""综述生成：确定性主题分组 + LLM 要点 + LLM 综述成文 → ReportData。
+"""综述生成：确定性主题分组 + 一次 LLM 调用产出要点与综述 → ReportData。
 
-- 主题分组：直接复用打标阶段的 level-1 标签（零 LLM 调用、与附录/检索完全一致、跨周可比）；
-- LLM 要点：为每条新闻写"一句话要点"（失败降级为摘要截断）；
-- LLM 综述：概览（含 bullet 要点）/ TOP5 / 趋势观察 / 下周关注（失败自动降级）。
-任一步失败都不会中断周报产出。
+- 主题分组：直接复用打标阶段的 level-1 标签（零 LLM 调用、与附录/检索一致、跨周可比）；
+- LLM 一次调用：逐条要点（30-80 字）+ 概览与要点 + TOP5 + 趋势三块 + 下周关注；
+- 任一步失败自动降级（要点用摘要、概览用统计、趋势留空），周报始终可产出。
 """
 
 from __future__ import annotations
@@ -75,35 +74,27 @@ def build_items(rows: list[dict], summary_max: int) -> list[dict]:
     return items
 
 
-# ---------- LLM 要点 + 综述 ----------
-_NOTES_SYSTEM_TMPL = """你是智能交通领域的周报综述助手。为下面列出的每条新闻写一句话要点，突出该条本周最值得关注之处。
+# ---------- LLM 综述（一次调用完成要点与综述成文） ----------
+_REPORT_SYSTEM_TMPL = """你是智能交通领域的周报综述助手。下面给出本周按主题分组的新闻清单（含编号、标题、来源与摘要）。请一次性完成两件事：为每条新闻写要点，并撰写整周综述。
 
 只输出一个 JSON 对象，格式：
-{{"notes": [{{"idx": 1, "note": "一句话要点"}}, ...]}}
-
-要求：
-- 覆盖全部 idx；
-- note 长度 30-80 字，应包含【核心事实】+【本周意义】两个层次（如"XX 中标 XX 项目（金额/规模），反映……动向"）；
-- 避免空泛评价（如"具有重要意义"），多写具体事实与信号。"""
-
-_STEP2_SYSTEM_TMPL = """你是智能交通领域的周报综述助手。综述成文任务：基于下面的主题分组撰写综述。
-
-只输出一个 JSON 对象，格式：
-{{"overview": "约 {overview_chars} 字的本周整体概览，全面覆盖主要主题并突出重点",
+{{"notes": [{{"idx": 1, "note": "该条要点"}}, ...],
+ "overview": "约 {overview_chars} 字的本周整体概览",
  "overview_points": ["要点1，20-40字", ...],
  "top5": [idx, idx, ...],
- "trends": {{"macro": ["宏观市场动态1，20-40字", ...],
-             "projects": ["重要工程/项目1，20-40字", ...],
-             "vendor_advice": ["集成商产品规划建议1，20-40字", ...]}},
- "next_week": ["下周关注1，20-40字", ...]}}
+ "trends": {{"macro": ["宏观市场动态，20-40字", ...],
+             "projects": ["重要工程或项目，20-40字", ...],
+             "vendor_advice": ["集成商产品规划建议，20-40字", ...]}},
+ "next_week": ["下周关注，20-40字", ...]}}
 
 要求：
+- notes 覆盖清单中的全部 idx；每条 30-80 字，包含【核心事实】+【本周意义】两个层次（如"XX 中标 XX 项目（金额/规模），反映……动向"），避免空泛评价；
 - overview {overview_chars} 字左右：概括本周整体态势（政策动向、技术进展、产业与厂商动态、城市与地方实践）并突出重点；
-- overview_points 给出 {points_count} 条结构化的本周要点，每条 20-40 字，可注明所属主题（如“政策：…”“厂商：…”）；
-- top5 为本周最重要的 5 条新闻 idx（按重要性排序，从给出的条目中选择）；
-- trends.macro：2-4 条智能交通市场宏观动态（行业规模/政策导向/投资风向/技术演进等）；
-- trends.projects：2-4 条本周重要工程与项目（如重大中标、试点落地、示范工程启动，尽量点出项目名称与承担方）；
-- trends.vendor_advice：2-4 条面向智能交通集成商的产品规划建议（结合本周信息给出方向性建议，如产品线重点、技术储备、市场切入点）；
+- overview_points 给出 {points_count} 条结构化要点，每条 20-40 字，可注明所属主题（如"政策：…""厂商：…"）；
+- top5 为本周最重要的 5 条新闻 idx（按重要性排序，从清单中选择）；
+- trends.macro：2-4 条智能交通市场宏观动态（行业规模、政策导向、投资风向、技术演进等）；
+- trends.projects：2-4 条本周重要工程与项目（重大中标、试点落地、示范工程启动，尽量点出项目名称与承担方）；
+- trends.vendor_advice：2-4 条面向智能交通集成商的产品规划建议（结合本周信息给出方向性建议）；
 - next_week 1-3 条，下周值得关注的方向。"""
 
 
@@ -131,25 +122,30 @@ def generate(cfg: Config, provider: LLMProvider, week: str,
 
     data.distribution = _distribution(items, _level1_names(cfg))
 
-    # 主题分组（确定性，复用打标 level-1 标签）+ LLM 写要点
-    themes, notes_ok = _build_themes(cfg, provider, items)
+    # 主题分组（确定性，复用打标 level-1 标签）
+    themes = _group_by_level1(items, _level1_names(cfg))
     data.themes = themes
 
-    # LLM 综述成文
+    # 一次调用完成：逐条要点 + 概览/要点/TOP5/趋势/下周关注
     overview_chars = int(c.get("overview_chars", 250))
     points_count = int(c.get("overview_points_count", 5))
-    overview, overview_points, top5, t_macro, t_projects, t_vendor, next_week = \
-        _step2_compose(cfg, provider, items, themes, overview_chars, points_count)
+    composed = _compose_all(cfg, provider, items, themes, overview_chars, points_count)
 
-    data.overview = overview or _fallback_overview(items)
-    data.overview_points = overview_points or _fallback_points(
+    notes = composed.get("notes") or {}
+    for t in data.themes:
+        for sub in t["items"]:
+            if notes.get(sub["idx"]):
+                sub["note"] = notes[sub["idx"]]
+
+    data.overview = composed.get("overview") or _fallback_overview(items)
+    data.overview_points = composed.get("overview_points") or _fallback_points(
         items, points_count, _level1_names(cfg))
-    data.top5 = _valid_indices(top5, items)
-    data.trends_macro = _str_list(t_macro)
-    data.trends_projects = _str_list(t_projects)
-    data.trends_vendor = _str_list(t_vendor)
-    data.next_week = _str_list(next_week)
-    data.fallback = (not notes_ok) or (overview is None)
+    data.top5 = _valid_indices(composed.get("top5") or [], items)
+    data.trends_macro = composed.get("trends_macro") or []
+    data.trends_projects = composed.get("trends_projects") or []
+    data.trends_vendor = composed.get("trends_vendor") or []
+    data.next_week = composed.get("next_week") or []
+    data.fallback = not composed
     return data
 
 
@@ -190,38 +186,32 @@ def _group_by_level1(items: list[dict], nodes: list[str]) -> list[dict]:
             for title, sub in ordered]
 
 
-def _build_themes(cfg: Config, provider: LLMProvider,
-                  items: list[dict]) -> tuple[list[dict], bool]:
-    """主题 = 确定性分组；要点 note 由 LLM 补充（失败用摘要兜底）。
+def _compose_all(cfg: Config, provider: LLMProvider, items: list[dict],
+                 themes: list[dict], overview_chars: int,
+                 points_count: int) -> dict:
+    """一次调用完成：逐条要点 + 概览与要点 + TOP5 + 趋势三块 + 下周关注。
 
-    返回 (themes, notes_ok)。
+    失败返回空 dict，由调用方使用规则兜底，保证周报始终可产出。
     """
-    themes = _group_by_level1(items, _level1_names(cfg))
-    notes = _notes_for_items(cfg, provider, items)
-    if notes:
-        for t in themes:
-            for sub in t["items"]:
-                sub["note"] = notes.get(sub["idx"], sub["note"])
-        return themes, True
-    return themes, False
-
-
-def _notes_for_items(cfg: Config, provider: LLMProvider,
-                     items: list[dict]) -> Optional[dict[int, str]]:
-    listing = "\n".join(f"{it['idx']}. {it['title']}（{it['source_name']}）"
-                        f"{' / ' + '/'.join(it['tags']) if it['tags'] else ''}"
-                        f" {it['summary']}" for it in items)
+    theme_text = "\n".join(
+        f"## {t['title']}\n" + "\n".join(
+            f"- {it['idx']}. {item_title(items, it['idx'])}"
+            f"（{item_source(items, it['idx'])}）{item_summary(items, it['idx'])}"
+            for it in t["items"])
+        for t in themes) or "（无主题分组）"
+    system = _REPORT_SYSTEM_TMPL.format(overview_chars=overview_chars,
+                                        points_count=points_count)
     messages = [
-        {"role": "system", "content": _NOTES_SYSTEM_TMPL},
-        {"role": "user", "content": f"本周新闻条目：\n{listing}"},
+        {"role": "system", "content": system},
+        {"role": "user", "content": f"本周按主题分组的新闻清单：\n{theme_text}"},
     ]
     try:
         raw = provider.chat(messages, json_mode=True, model=cfg.report_model)
         data = extract_json(raw)
         if not data:
-            logger.warning("要点生成未返回有效 JSON")
-            return None
-        out: dict[int, str] = {}
+            logger.warning("综述调用未返回有效 JSON，使用降级内容")
+            return {}
+        notes: dict[int, str] = {}
         for n in data.get("notes") or []:
             try:
                 idx = int(n.get("idx"))
@@ -229,53 +219,57 @@ def _notes_for_items(cfg: Config, provider: LLMProvider,
                 continue
             note = _str(n.get("note"))
             if note:
-                out[idx] = _truncate(note, 80)
-        return out or None
-    except Exception as exc:
-        logger.warning("要点生成失败，将使用摘要作为要点: {}", exc)
-        return None
-
-
-def _step2_compose(cfg: Config, provider: LLMProvider, items: list[dict],
-                   themes: list[dict], overview_chars: int,
-                   points_count: int) -> tuple[Optional[str], list[str], list[int],
-                                               list[str], list[str], list[str], list[str]]:
-    theme_text = "\n".join(
-        f"## {t['title']}\n" + "\n".join(f"- {it['idx']}. {it['note']}" for it in t["items"])
-        for t in themes) or "（无主题分组）"
-    system = _STEP2_SYSTEM_TMPL.format(overview_chars=overview_chars,
-                                       points_count=points_count)
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": f"主题分组如下：\n{theme_text}"},
-    ]
-    try:
-        raw = provider.chat(messages, json_mode=True, model=cfg.report_model)
-        data = extract_json(raw)
-        if not data:
-            return None, [], [], [], [], [], []
-        top5 = []
+                notes[idx] = _truncate(note, 80)
+        top5: list[int] = []
         for idx in (data.get("top5") or []):
             try:
                 top5.append(int(idx))
             except (TypeError, ValueError):
                 continue
         t_macro, t_projects, t_vendor = _parse_trends(data.get("trends"))
-        return (_str(data.get("overview")), _str_list(data.get("overview_points"))[:points_count],
-                top5, t_macro, t_projects, t_vendor, _str_list(data.get("next_week")))
+        return {
+            "notes": notes,
+            "overview": _str(data.get("overview")) or None,
+            "overview_points": _str_list(data.get("overview_points"))[:points_count],
+            "top5": top5,
+            "trends_macro": t_macro, "trends_projects": t_projects,
+            "trends_vendor": t_vendor,
+            "next_week": _str_list(data.get("next_week")),
+        }
     except Exception as exc:
-        logger.warning("综述成文失败，使用降级内容: {}", exc)
-        return None, [], [], [], [], [], []
+        logger.warning("综述调用失败，使用降级内容: {}", exc)
+        return {}
 
 
 def _parse_trends(v) -> tuple[list[str], list[str], list[str]]:
-    """解析趋势字段：新格式为 dict{macro,projects,vendor_advice}；兼容旧格式 list。"""
+    """解析趋势字段：dict{macro,projects,vendor_advice}；兼容旧格式 list。"""
     if isinstance(v, dict):
         return (_str_list(v.get("macro")), _str_list(v.get("projects")),
                 _str_list(v.get("vendor_advice") or v.get("vendor")))
     if isinstance(v, list):
         return _str_list(v), [], []
     return [], [], []
+
+
+def item_title(items: list[dict], idx: int) -> str:
+    for it in items:
+        if it["idx"] == idx:
+            return it["title"]
+    return ""
+
+
+def item_source(items: list[dict], idx: int) -> str:
+    for it in items:
+        if it["idx"] == idx:
+            return it.get("source_name", "")
+    return ""
+
+
+def item_summary(items: list[dict], idx: int) -> str:
+    for it in items:
+        if it["idx"] == idx:
+            return it.get("summary", "")
+    return ""
 
 
 # ---------- 类别分布与降级 ----------

@@ -73,7 +73,7 @@ class Config:
     """
 
     def __init__(self, root: Path, app: dict, llm: dict, collect: dict,
-                 classify: dict, report: dict, notify: dict,
+                 classify: dict, report: dict, notify: dict, archive: dict,
                  sources: list, taxonomy: list):
         self.root = root
         self.app = D(app)
@@ -82,6 +82,7 @@ class Config:
         self.classify = D(classify)
         self.report = D(report)
         self.notify = D(notify)
+        self.archive = D(archive)
         self.sources = sources
         self.taxonomy = taxonomy
         self.data_dir = (root / str(app.get("data_dir", "data"))).resolve()
@@ -111,6 +112,7 @@ class Config:
             classify=main.get("classify", {}),
             report=main.get("report", {}),
             notify=main.get("notify", {}),
+            archive=main.get("archive", {}),
             sources=list(sources_doc.get("sources", [])),
             taxonomy=list(taxonomy_doc.get("taxonomy", [])),
         )

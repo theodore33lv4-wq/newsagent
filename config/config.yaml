@@ -32,9 +32,17 @@ collect:
 classify:
   summary_max_chars: 100         # LLM 输出摘要长度上限（提示词中约定）
   json_retries: 1                # JSON 解析失败额外重试次数
-  max_input_chars: 2000          # 单条新闻正文输入上限（截断防超长）
-  concurrency: 4                 # 打标并行数
+  max_input_chars: 2000          # 单条调用时的正文输入上限（截断防超长）
+  batch_size: 10                 # 批次调用：每次请求合并的新闻条数
+  batch_concurrency: 2           # 批次并发数
+  batch_max_chars_per_item: 1200 # 批次调用时每条正文的截断长度
   vendor_importance_floor: 2     # 厂商动态类新闻的重要度下限（保障占比）
+
+archive:
+  strict_week: true              # 只保留目标周（周一~周日）内发布的新闻；无日期则丢弃
+  min_text_chars: 300            # 正文长度下限，低于此判为非新闻页
+  max_link_density: 0.60         # 链接密度上限（实测：文章页 ≤0.50，列表页 ≥0.74）
+  reject_aggregate_titles: true  # 排除"汇总/盘点/合集"类聚合贴
 
 report:
   max_items: 120                 # 综述输入条目上限（超出按重要度截断）

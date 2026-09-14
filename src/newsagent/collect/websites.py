@@ -8,23 +8,27 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime, time, timezone
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 from loguru import logger
 
+from ..utils.dateparse import parse_date_from_text, parse_date_from_url
 from .base import Article, Collector, fetch
 
 _SKIP_HREF = ("javascript:", "mailto:", "tel:", "#", "data:")
 
 
 def _is_article_link(href: str) -> bool:
+    """过滤明显非文章的链接形态。
+
+    注意：不要排除以 "?" 开头的纯查询链接 —— 部分站点（如赛文交通网）的
+    文章地址正是 "?m=home&c=View&a=index&aid=xxxx" 这种形式。
+    """
     if not href or href.lower().startswith(_SKIP_HREF):
         return False
-    # 排除纯锚点/纯查询
-    if href.startswith("#") or href.startswith("?"):
-        return False
-    return True
+    return not href.startswith("#")
 
 
 def _same_host(netloc: str, base_host: str) -> bool:
@@ -78,9 +82,16 @@ class WebsiteCollector(Collector):
             title = a.get_text(" ", strip=True)
             if not title:
                 continue
+            # 列表层日期线索：链接文本（如"标题 2026-08-26"）与 URL 路径（如 /2026-09/10/）
+            published = (parse_date_from_text(title, default_year=date.today().year)
+                         or parse_date_from_text(a.parent.get_text(" ", strip=True)
+                                                 if a.parent else "", default_year=date.today().year)
+                         or parse_date_from_url(url))
             articles.append(Article(
                 url=url, title=title,
                 source_id=self.source_id, source_name=self.source_name,
+                published_at=(datetime.combine(published, time.min, tzinfo=timezone.utc)
+                              if published else None),
             ))
         logger.info("[{}] 网站采集 {} 条 @ {}（选择器 {}）", self.source_id,
                     len(articles), list_url, selector)

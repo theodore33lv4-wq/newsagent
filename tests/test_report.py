@@ -28,7 +28,7 @@ def test_generate_mock(cfg):
     assert titles == ["厂商动态", "车路协同/智能网联"]
     # 每条要点来自 LLM（Mock notes），要求 30-80 字双层次
     all_notes = "".join(it["note"] for t in data.themes for it in t["items"])
-    assert "披露中标" in all_notes
+    assert "常态化阶段" in all_notes
     assert len(all_notes.split("，")[0]) >= 10
     assert data.overview and data.overview_points
     assert all(1 <= i <= 2 for i in data.top5)
@@ -53,8 +53,8 @@ def test_themes_reuse_level1_tags(cfg):
     data = generate(cfg, prov, "2026-W35", ROWS, "now")
     titles = {t["title"] for t in data.themes}
     assert titles == {"厂商动态", "车路协同/智能网联"}
-    assert data.fallback is True      # 要点与综述均降级
-    assert prov.calls == 2            # 共 2 次调用（要点+综述）；归类为零调用
+    assert data.fallback is True      # 综述降级（要点用摘要兜底）
+    assert prov.calls == 1            # 要点与综述已合并为一次调用；归类零调用
 
     # 主题与附录标签一致（同一条新闻不会出现"归类冲突"）
     idx2_theme = next(t["title"] for t in data.themes

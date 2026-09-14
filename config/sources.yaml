@@ -65,7 +65,7 @@ sources:
     enabled: true
     base_url: https://www.7its.com
     list_url: "https://www.7its.com/index.php?m=home&c=Lists&a=index&tid=5"
-    article_selector: "a[href*='c=View']"    # 实测：文章链接形如 ?m=home&c=View&a=index&aid=32199
+    article_selector: "li.item h2.item-title a"   # 主列表容器（实测 12 篇/页，排除侧栏广告与热门专题区块）
     limit: 30
 
   - id: gasgoo_tech

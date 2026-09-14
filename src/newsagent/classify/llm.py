@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from abc import ABC, abstractmethod
 from typing import Any
@@ -117,10 +118,26 @@ class MockLLMProvider(LLMProvider):
              temperature: float | None = None, model: str | None = None) -> str:
         system = next((m["content"] for m in messages
                        if m.get("role") == "system"), "")
+        user = next((m["content"] for m in messages
+                     if m.get("role") == "user"), "")
         if self._responder is not None:
             return self._responder(messages)
+        # 批次打标：按 user 段里的 ### 编号逐条返回
+        if "逐条分析" in system or '"results"' in system:
+            idxs = [int(x) for x in re.findall(r"^###\s*(\d+)", user, re.M)] or [1]
+            return json.dumps({"results": [
+                {"idx": i, "is_article": True, "published_date": None,
+                 "relevant": True, "tags": ["厂商动态/集成商动态"],
+                 "summary": "Mock 摘要：该新闻介绍某智能交通集成商中标信号控制项目。",
+                 "keywords": ["信号控制", "集成商", "中标"],
+                 "companies": ["中控信息", "银江技术"], "importance": 2}
+                for i in idxs
+            ]}, ensure_ascii=False)
+        # 单条打标（批次缺项时的补偿调用）
         if "新闻打标" in system:
             return json.dumps({
+                "is_article": True,
+                "published_date": None,
                 "relevant": True,
                 "tags": ["厂商动态/集成商动态"],
                 "summary": "Mock 摘要：该新闻介绍某智能交通集成商中标信号控制项目。",
@@ -128,15 +145,15 @@ class MockLLMProvider(LLMProvider):
                 "companies": ["中控信息", "银江技术"],
                 "importance": 2,
             }, ensure_ascii=False)
-        if "一句话要点" in system:
+        # 周报：一次调用同时返回要点与综述
+        if "周报综述" in system:
+            idxs = [int(x) for x in re.findall(r"^-\s*(\d+)\.", user, re.M)] or [1, 2]
             return json.dumps({
                 "notes": [
-                    {"idx": 1, "note": "车路云一体化试点扩容，多地公布建设进度，反映试点进入常态化阶段。"},
-                    {"idx": 2, "note": "两家集成商披露中标信号控制项目，金额显著，反映交管市场招标节奏加快。"},
+                    {"idx": i,
+                     "note": "车路云一体化试点扩容，多地公布建设进度，反映试点进入常态化阶段。"}
+                    for i in idxs
                 ],
-            }, ensure_ascii=False)
-        if "周报综述" in system:
-            return json.dumps({
                 "overview": "Mock 综述：本周智能交通领域动态聚焦车路协同与集成商中标。"
                             "政策端推动车路云一体化试点扩大，产业端多家集成商披露中标信息，"
                             "智慧高速建设进入机电改扩建密集期。",
@@ -145,11 +162,7 @@ class MockLLMProvider(LLMProvider):
                     "产业：两家集成商披露中标信息",
                     "城市：多地推进信号控制优化",
                 ],
-                "themes": [
-                    {"title": "车路协同/智能网联", "items": [{"idx": 1, "note": "试点城市扩大。"}]},
-                    {"title": "厂商动态", "items": [{"idx": 2, "note": "两家集成商中标。"}]},
-                ],
-                "top5": [1, 2],
+                "top5": idxs[:2],
                 "trends": {
                     "macro": ["智能交通投资持续增长，试点城市扩容。", "政策导向由单点建设转向规模化应用。"],
                     "projects": ["某市车路云示范区二期开工。", "高速公路改扩建机电项目密集招标。"],

@@ -55,9 +55,17 @@ def _truncate(s: str, n: int) -> str:
 
 
 def build_items(rows: list[dict], summary_max: int) -> list[dict]:
-    """store 行 → 带 idx 的条目列表（截断摘要）。"""
+    """store 行 → 带 idx 的条目列表。
+
+    摘要按 summary_max 做防御性截断，但**不加省略号**：提示词里的摘要若带"…"，
+    模型可能直接照抄到要点里，造成"要点被截断"的观感。打标阶段的摘要本身
+    已限制在 100 字左右，这里通常不会触发。
+    """
     items = []
     for i, row in enumerate(rows, start=1):
+        summary = (row.get("summary") or "").strip()
+        if summary_max and len(summary) > summary_max:
+            summary = summary[:summary_max].rstrip("，。；、 ") 
         items.append({
             "idx": i,
             "title": row.get("title", ""),
@@ -66,7 +74,7 @@ def build_items(rows: list[dict], summary_max: int) -> list[dict]:
             "tags": row.get("tags", []) or [],
             "companies": row.get("companies", []) or [],
             "importance": row.get("importance"),
-            "summary": _truncate(row.get("summary") or "", summary_max),
+            "summary": summary,
             "url": row.get("url", ""),
             "html_file": row.get("html_file"),
             "guid": row.get("guid"),
@@ -88,7 +96,7 @@ _REPORT_SYSTEM_TMPL = """你是智能交通领域的周报综述助手。下面�
  "next_week": ["下周关注，20-40字", ...]}}
 
 要求：
-- notes 覆盖清单中的全部 idx；每条 30-80 字，包含【核心事实】+【本周意义】两个层次（如"XX 中标 XX 项目（金额/规模），反映……动向"），避免空泛评价；
+- notes 覆盖清单中的全部 idx；每条用自然、完整的语言概括该条新闻的内容（约 40-90 字，把事情讲清楚即可，长度略超无妨）。不要套用"事实 + 分号 + 意义"之类的固定句式，也不必为了结构完整硬加评论或总结性收尾；请用自己的话重新组织，不要直接照抄清单中给出的摘要原文；
 - overview {overview_chars} 字左右：概括本周整体态势（政策动向、技术进展、产业与厂商动态、城市与地方实践）并突出重点；
 - overview_points 给出 {points_count} 条结构化要点，每条 20-40 字，可注明所属主题（如"政策：…""厂商：…"）；
 - top5 为本周最重要的 5 条新闻 idx（按重要性排序，从清单中选择）；
@@ -181,7 +189,7 @@ def _group_by_level1(items: list[dict], nodes: list[str]) -> list[dict]:
         groups.setdefault(key, []).append(it)
     ordered = sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
     return [{"title": title,
-             "items": [{"idx": it["idx"], "note": _truncate(it["summary"], 40)}
+             "items": [{"idx": it["idx"], "note": _str(it.get("summary"))}
                        for it in sub]}
             for title, sub in ordered]
 
@@ -219,7 +227,7 @@ def _compose_all(cfg: Config, provider: LLMProvider, items: list[dict],
                 continue
             note = _str(n.get("note"))
             if note:
-                notes[idx] = _truncate(note, 80)
+                notes[idx] = note          # 完整保留，不做截断（长度略超无妨）
         top5: list[int] = []
         for idx in (data.get("top5") or []):
             try:

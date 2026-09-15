@@ -26,10 +26,10 @@ def test_generate_mock(cfg):
     # 主题 = 确定性复用打标 level-1 标签（数量降序、名称升序）
     titles = [t["title"] for t in data.themes]
     assert titles == ["厂商动态", "车路协同/智能网联"]
-    # 每条要点来自 LLM（Mock notes），要求 30-80 字双层次
+    # 每条要点来自 LLM（Mock notes），完整保留不截断
     all_notes = "".join(it["note"] for t in data.themes for it in t["items"])
     assert "常态化阶段" in all_notes
-    assert len(all_notes.split("，")[0]) >= 10
+    assert "…" not in all_notes
     assert data.overview and data.overview_points
     assert all(1 <= i <= 2 for i in data.top5)
     # 趋势观察结构化为三块
@@ -37,6 +37,29 @@ def test_generate_mock(cfg):
     # 类别分布：数量总和 = 条目数
     assert sum(d["count"] for d in data.distribution) == len(data.items)
     assert data.distribution[0]["count"] >= data.distribution[-1]["count"]
+
+
+def test_long_notes_not_truncated(cfg):
+    """要点超出字数上限时完整保留，不得用省略号截断。"""
+    long_note = ("中控信息联合体中标某市智能交通信号控制系统项目，合同金额约 1.2 亿元，"
+                 "覆盖全市 320 个路口，计划分三期完成改造并接入市级交通大脑平台。"
+                 "项目要求统一接入既有电警、卡口与雷达数据，实现区域协调控制与自适应配时，"
+                 "同时预留车路协同路侧设备接口，为后续示范区扩容做准备。")
+
+    class LongNoteProvider:
+        def chat(self, messages, **kw):
+            import json as _json
+            return _json.dumps({
+                "notes": [{"idx": 1, "note": long_note}, {"idx": 2, "note": long_note}],
+                "overview": "概览", "overview_points": ["要点"],
+                "top5": [1], "trends": {"macro": ["m"], "projects": ["p"], "vendor_advice": ["v"]},
+                "next_week": ["n"],
+            }, ensure_ascii=False)
+
+    data = generate(cfg, LongNoteProvider(), "2026-W35", ROWS, "now")
+    notes = [it["note"] for t in data.themes for it in t["items"]]
+    assert notes and all(n == long_note for n in notes)
+    assert len(notes[0]) > 80 and "…" not in notes[0]
 
 
 def test_themes_reuse_level1_tags(cfg):

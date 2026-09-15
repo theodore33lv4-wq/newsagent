@@ -46,7 +46,7 @@ archive:
 
 report:
   max_items: 120                 # 综述输入条目上限（超出按重要度截断）
-  summary_max_chars: 90          # 输入 LLM 的单条摘要截断长度
+  summary_max_chars: 200         # 输入 LLM 的单条摘要防御性上限（打标摘要约 100 字，通常不触发；截断不加省略号）
   formats: ["html", "docx"]      # 输出格式（html 为自包含单文件）
   schedule_note: "每周一 08:00（Windows 任务计划程序）"
 

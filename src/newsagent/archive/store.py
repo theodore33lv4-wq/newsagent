@@ -209,6 +209,25 @@ class Store:
         with self._connect() as conn:
             conn.execute("UPDATE articles SET week=? WHERE guid=?", (week, guid))
 
+    def list_filtered(self, week: str) -> list[dict]:
+        """列出某一周被过滤的条目（用于核对后再恢复）。"""
+        return self.query(week=week, status=_STATUS_FILTERED,
+                          relevant_only=False, limit=1000)
+
+    def recover_filtered(self, week: str) -> int:
+        """把某一周被过滤的条目恢复为待分类状态，返回恢复条数。
+
+        典型场景：早期版本把"目标周之后发布"的新闻误判为过期新闻并过滤，
+        这些条目已登记去重、不会再被采集，需要手工放回待分类队列。
+        """
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE articles SET status=?, relevance=NULL, note=? "
+                "WHERE week=? AND status=?",
+                (_STATUS_NEW, "已恢复待分类（此前被过滤）", week, _STATUS_FILTERED),
+            )
+        return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+
     def set_note(self, guid: str, note: str) -> None:
         with self._connect() as conn:
             conn.execute("UPDATE articles SET note=? WHERE guid=?", (note, guid))

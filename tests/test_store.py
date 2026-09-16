@@ -69,5 +69,23 @@ def test_article_text_and_seen_keys(cfg, article, sample_html):
     assert len(ukeys) == 1 and len(tkeys) == 1
 
 
+def test_recover_filtered(cfg, article, sample_html):
+    """被过滤条目可恢复为待分类状态（用于数据补救）。"""
+    st = _make_store(cfg)
+    fc = FetchedContent(html=sample_html, text="正文", extractor="trafilatura",
+                        meta_title="标题", meta_date=None)
+    row = st.save_article("2026-W38", article, fc, status="filtered",
+                          note="已过滤：早于目标周")
+    assert [r["guid"] for r in st.list_filtered("2026-W38")] == [row["guid"]]
+    # 过滤中的条目不会进入周报（relevance 为空）
+    assert st.get_week("2026-W38") == []
+
+    assert st.recover_filtered("2026-W38") == 1
+    rows = st.query(week="2026-W38", relevant_only=False)
+    assert rows[0]["status"] == "archived" and rows[0]["relevance"] is None
+    assert st.list_filtered("2026-W38") == []
+    assert st.recover_filtered("2026-W38") == 0        # 幂等
+
+
 def test_guid(cfg):
     assert guid_for("https://a.com/x") == guid_for("https://A.com/x")

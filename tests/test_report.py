@@ -39,6 +39,36 @@ def test_generate_mock(cfg):
     assert data.distribution[0]["count"] >= data.distribution[-1]["count"]
 
 
+def test_short_source_name(cfg):
+    from newsagent.report.generator import _short_source
+    assert _short_source("工信部·政策与公告（首页精选）") == "工信部"
+    assert _short_source("赛文交通网·资讯（集成商内容密集）") == "赛文交通网"
+    assert _short_source("交通运输部·交通要闻（政策类）") == "交通运输部"
+    assert _short_source("ITS114智慧交通（搜狐号）") == "ITS114智慧交通"
+
+
+def test_report_layer_dedupe(cfg):
+    """报告层查重：标题相同的跨源转载只保留一条。"""
+    rows = [
+        {"guid": "d1", "title": "山西主骨架公路5年内实现数字化升级",
+         "source_name": "交通运输部", "published_at": "2026-09-10", "tags": ["政策法规"],
+         "companies": [], "importance": 2, "summary": "s", "url": "https://a/1",
+         "html_file": None, "content_hash": "h1"},
+        {"guid": "d2", "title": "山西主骨架公路5年内实现数字化升级",
+         "source_name": "中国交通新闻网", "published_at": "2026-09-10", "tags": ["政策法规"],
+         "companies": [], "importance": 2, "summary": "s", "url": "https://b/2",
+         "html_file": None, "content_hash": "h2"},
+        {"guid": "d3", "title": "城市摆渡人变身治理合伙人",
+         "source_name": "交通运输部", "published_at": "2026-09-11", "tags": ["智能公交/出租"],
+         "companies": [], "importance": 1, "summary": "s", "url": "https://a/3",
+         "html_file": None, "content_hash": "h3"},
+    ]
+    data = generate(cfg, MockLLMProvider(), "2026-W35", rows, "now")
+    titles = [it["title"] for it in data.items]
+    assert titles.count("山西主骨架公路5年内实现数字化升级") == 1
+    assert len(data.items) == 2
+
+
 def test_long_notes_not_truncated(cfg):
     """要点超出字数上限时完整保留，不得用省略号截断。"""
     long_note = ("中控信息联合体中标某市智能交通信号控制系统项目，合同金额约 1.2 亿元，"

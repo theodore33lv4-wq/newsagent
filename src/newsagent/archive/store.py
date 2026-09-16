@@ -91,6 +91,16 @@ class Store:
             rows = conn.execute("SELECT url_key, title_key FROM articles").fetchall()
         return [r["url_key"] for r in rows], [r["title_key"] for r in rows]
 
+    def find_by_content_hash(self, content_hash: str | None) -> Optional[str]:
+        """按正文内容哈希查找已有条目（跨源转载的同一篇新闻）。"""
+        if not content_hash:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT guid FROM articles WHERE content_hash=? LIMIT 1",
+                (content_hash,)).fetchone()
+        return row["guid"] if row else None
+
     # ---------- 保存 ----------
     def save_article(self, week: str, article: Article,
                      content: FetchedContent, *, status: str = _STATUS_NEW,

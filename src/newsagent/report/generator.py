@@ -54,6 +54,60 @@ def _truncate(s: str, n: int) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+def _short_source(name: str) -> str:
+    """来源列显示名：去掉括号补充说明与"·"之后的频道名。
+
+    例："工信部·政策与公告（首页精选）" → "工信部"；"赛文交通网·资讯（集成商内容密集）" → "赛文交通网"
+    """
+    s = (name or "").strip()
+    s = re.sub(r"[（(].*?[)）]", "", s)
+    s = s.split("·")[0]
+    return s.strip() or (name or "").strip()
+
+
+def _dedupe_rows(rows: list[dict], threshold: float = 0.90) -> list[dict]:
+    """报告层查重：正文哈希相同、或标题高度相似的跨源转载只保留一条。
+
+    这是去重的第三道防线（前两道：采集层 URL/标题 key、存档层正文哈希），
+    同时可修正历史数据中已有的重复条目。
+    """
+    from difflib import SequenceMatcher
+
+    from ..collect.dedup import normalize_title
+
+    kept: list[dict] = []
+    kept_titles: list[str] = []
+    seen_hashes: set[str] = set()
+    dropped = 0
+    for row in rows:
+        chash = row.get("content_hash")
+        if chash and chash in seen_hashes:
+            dropped += 1
+            continue
+        nt = normalize_title(row.get("title") or "")
+        is_dup = False
+        for kt in kept_titles:
+            if not nt or not kt:
+                continue
+            short, long_ = (nt, kt) if len(nt) <= len(kt) else (kt, nt)
+            if long_.startswith(short) and len(short) / len(long_) >= 0.75:
+                is_dup = True
+                break
+            if SequenceMatcher(None, nt, kt).ratio() >= threshold:
+                is_dup = True
+                break
+        if is_dup:
+            dropped += 1
+            continue
+        if chash:
+            seen_hashes.add(chash)
+        kept_titles.append(nt)
+        kept.append(row)
+    if dropped:
+        logger.info("报告层查重：去除重复条目 {} 条（跨源转载同一新闻）", dropped)
+    return kept
+
+
 def build_items(rows: list[dict], summary_max: int) -> list[dict]:
     """store 行 → 带 idx 的条目列表。
 
@@ -65,11 +119,12 @@ def build_items(rows: list[dict], summary_max: int) -> list[dict]:
     for i, row in enumerate(rows, start=1):
         summary = (row.get("summary") or "").strip()
         if summary_max and len(summary) > summary_max:
-            summary = summary[:summary_max].rstrip("，。；、 ") 
+            summary = summary[:summary_max].rstrip("，。；、 ")
         items.append({
             "idx": i,
             "title": row.get("title", ""),
             "source_name": row.get("source_name", ""),
+            "source_short": _short_source(row.get("source_name", "")),
             "published_at": (row.get("published_at") or "")[:10],
             "tags": row.get("tags", []) or [],
             "companies": row.get("companies", []) or [],
@@ -109,8 +164,9 @@ _REPORT_SYSTEM_TMPL = """你是智能交通领域的周报综述助手。下面�
 def generate(cfg: Config, provider: LLMProvider, week: str,
              rows: list[dict], generated_at: str) -> ReportData:
     c = cfg.report
-    summary_max = int(c.get("summary_max_chars", 90))
+    summary_max = int(c.get("summary_max_chars", 200))
     max_items = int(c.get("max_items", 120))
+    rows = _dedupe_rows(rows)              # 报告层查重（跨源转载只保留一条）
     if len(rows) > max_items:
         logger.warning("综述条目 {} 超过上限 {}，按重要度截断", len(rows), max_items)
         rows = sorted(rows, key=lambda r: (r.get("importance") or 0), reverse=True)[:max_items]

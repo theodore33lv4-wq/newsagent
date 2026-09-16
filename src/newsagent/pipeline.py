@@ -19,7 +19,7 @@ from .archive.store import Store
 from .classify.llm import LLMProvider, create_provider
 from .classify.tagger import Tagger
 from .collect import build_collectors, gather_all
-from .collect.dedup import DedupChecker
+from .collect.dedup import DedupChecker, content_key
 from .report import write_report
 from .utils.config import Config
 from .utils.dates import iso_week, target_week, week_range
@@ -35,6 +35,7 @@ class RunStats:
     archived: int = 0
     archived_failed: int = 0
     rejected: int = 0                     # 非新闻页（页面体检或模型判定）
+    duplicates: int = 0                   # 正文重复（跨源转载同一篇新闻）
     out_of_week: int = 0                  # 发布日期不在目标周
     date_pending: int = 0                 # 日期待模型判定
     reject_reasons: dict = field(default_factory=dict)
@@ -78,15 +79,17 @@ def run_pipeline(cfg: Config, *, week: str | None = None, limit: int | None = No
     stats.candidates = len(candidates)
 
     checker = DedupChecker(*store.seen_keys())
-    # 先过滤出新条目，再应用 limit；只有实际处理的条目才登记去重，
-    # 避免 limit 截断的条目在下次运行被误判为"已见过"
-    new_all = [a for a in candidates if checker.is_new(a)]
-    if limit:
-        new_articles = new_all[: max(0, int(limit))]
-    else:
-        new_articles = new_all
-    for a in new_articles:
+    # 逐条判定并**立即登记**：既能过滤同一批内的跨源重复（标题/URL 相同），
+    # 也不会把被 limit 截断、本轮未处理的条目误标记为"已见过"。
+    new_articles = []
+    limit_n = max(0, int(limit)) if limit else None
+    for a in candidates:
+        if not checker.is_new(a):
+            continue
+        if limit_n is not None and len(new_articles) >= limit_n:
+            continue
         checker.add(a)
+        new_articles.append(a)
     stats.new_articles = len(new_articles)
 
     if dry_run:
@@ -153,6 +156,17 @@ def run_pipeline(cfg: Config, *, week: str | None = None, limit: int | None = No
                                note=f"发布日期 {pub_date} 不在目标周 {week}",
                                published_iso=pub_date.isoformat())
             continue
+
+        # 内容哈希查重：同一篇新闻被不同来源转载（标题/URL 不同，正文一致）
+        chash = content_key(content.text) if content.text else None
+        if store.find_by_content_hash(chash):
+            stats.duplicates += 1
+            store.save_article(week, article, content, status="filtered",
+                               note="与其他来源的同一篇新闻重复（正文内容一致）",
+                               published_iso=pub_date.isoformat() if pub_date else None)
+            logger.debug("[查重] 正文重复，已过滤：{}", article.url)
+            continue
+
         if result == "date_pending":
             stats.date_pending += 1
             store.save_article(week, article, content, status="archived",
@@ -164,8 +178,9 @@ def run_pipeline(cfg: Config, *, week: str | None = None, limit: int | None = No
             continue
         stats.archived += 1
 
-    logger.info("存档阶段：成功 {} / 非新闻页 {} / 不在目标周 {} / 日期待判定 {} / 下载失败 {}",
-                stats.archived, stats.rejected, stats.out_of_week,
+    logger.info("存档阶段：成功 {} / 正文重复 {} / 非新闻页 {} / 不在目标周 {} / "
+                "日期待判定 {} / 下载失败 {}",
+                stats.archived, stats.duplicates, stats.rejected, stats.out_of_week,
                 stats.date_pending, stats.archived_failed)
 
     if stats.archived == 0 and stats.date_pending == 0:
@@ -248,10 +263,10 @@ def run_pipeline(cfg: Config, *, week: str | None = None, limit: int | None = No
 
     # ---------- 汇总与告警 ----------
     reasons = "、".join(f"{k}×{v}" for k, v in stats.reject_reasons.items()) or "无"
-    logger.info("===== 流水线结束：候选 {} / 新条目 {} / 存档成功 {} / 非新闻页 {} / "
-                "不在目标周 {} / 日期待判定 {} / 下载失败 {} / 分类 {} / 相关 {} / "
-                "厂商动态 {} / 综述 {} =====",
-                stats.candidates, stats.new_articles, stats.archived,
+    logger.info("===== 流水线结束：候选 {} / 新条目 {} / 存档成功 {} / 正文重复 {} / "
+                "非新闻页 {} / 不在目标周 {} / 日期待判定 {} / 下载失败 {} / 分类 {} / "
+                "相关 {} / 厂商动态 {} / 综述 {} =====",
+                stats.candidates, stats.new_articles, stats.archived, stats.duplicates,
                 stats.rejected, stats.out_of_week, stats.date_pending,
                 stats.archived_failed, stats.classified, stats.relevant,
                 stats.vendor, "有" if stats.report_paths else "无")

@@ -136,20 +136,20 @@ def to_docx(data: ReportData, path: Path) -> None:
     if not data.next_week:
         _para(doc, "（无）")
 
-    # 附录清单
+    # 附录清单（列：# / 标题 / 来源 / 日期 / 重要度）
     _heading(doc, f"附录：本周新闻清单（{len(data.items)} 条）", 1)
-    table = doc.add_table(rows=1, cols=6)
+    table = doc.add_table(rows=1, cols=5)
     table.style = "Table Grid"
-    headers = ["#", "标题", "来源", "日期", "标签", "重要度"]
+    headers = ["#", "标题", "来源", "日期", "重要度"]
     for cell, text in zip(table.rows[0].cells, headers):
         cell.text = ""
         _set_cn(cell.paragraphs[0].add_run(text), size=10, bold=True)
     for it in data.items:
         row = table.add_row()
-        values = [str(it["idx"]), it["title"], it["source_name"],
-                  str(it.get("published_at") or "—"),
-                  "/".join(it.get("tags") or []),
-                  str(it.get("importance") or "—")]
+        stars = "★" * int(it.get("importance") or 0)
+        values = [str(it["idx"]), it["title"],
+                  it.get("source_short") or it.get("source_name", ""),
+                  str(it.get("published_at") or "—"), stars or "—"]
         for cell, text in zip(row.cells, values):
             cell.text = ""
             _set_cn(cell.paragraphs[0].add_run(text), size=9.5)

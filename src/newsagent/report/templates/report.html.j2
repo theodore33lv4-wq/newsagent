@@ -38,6 +38,12 @@
   table { width:100%; border-collapse:collapse; font-size:13px; }
   th, td { border:1px solid var(--line); padding:6px 8px; text-align:left; vertical-align:top; }
   th { background:#eef4f8; color:#0e4a6b; }
+  /* 附录表格：固定列宽，避免"重要度/链接"被挤成单字换行 */
+  table.appendix { table-layout:fixed; }
+  table.appendix th { white-space:nowrap; }
+  table.appendix td { padding:6px 8px; line-height:1.55; }
+  table.appendix td.nowrap { white-space:nowrap; }
+  table.appendix td.links a { display:block; }
   .tag { display:inline-block; background:#e7f1f7; color:#0b5f8a; border-radius:3px;
          padding:0 6px; margin:1px 3px 1px 0; font-size:12px; }
   .imp { color:var(--accent); font-weight:bold; }
@@ -146,19 +152,24 @@
 
   <section>
     <h2>附录：本周新闻清单（{{ items|length }} 条）</h2>
-    <table>
-      <thead><tr><th>#</th><th>标题</th><th>来源</th><th>日期</th><th>标签</th><th>重要度</th><th>链接</th></tr></thead>
+    <table class="appendix">
+      <colgroup>
+        <col style="width:4%"><col><col style="width:12%"><col style="width:11%">
+        <col style="width:9%"><col style="width:8%">
+      </colgroup>
+      <thead><tr><th>#</th><th>标题</th><th>来源</th><th>日期</th><th>重要度</th><th>链接</th></tr></thead>
       <tbody>
       {% for it in items %}
         <tr id="item-{{ it.idx }}">
           <td>{{ it.idx }}</td>
           <td><strong>{{ it.title }}</strong></td>
-          <td>{{ it.source_name }}</td>
-          <td>{{ it.published_at or '—' }}</td>
-          <td>{% for t in it.tags %}<span class="tag">{{ t }}</span>{% endfor %}</td>
-          <td class="imp">{{ it.importance if it.importance else '—' }}</td>
-          <td>{% if it.url %}<a href="{{ it.url }}" target="_blank" rel="noopener">原文</a>{% endif %}
-              {% if it.html_link %}<a href="{{ it.html_link }}" title="{{ it.html_file }}">存档</a>{% endif %}</td>
+          <td class="nowrap">{{ it.source_short or it.source_name }}</td>
+          <td class="nowrap">{{ it.published_at or '—' }}</td>
+          <td class="nowrap imp">{{ stars(it.importance) or '—' }}</td>
+          <td class="nowrap links">
+            {% if it.url %}<a href="{{ it.url }}" target="_blank" rel="noopener">原文</a>{% endif %}
+            {% if it.html_link %}<a href="{{ it.html_link }}" title="{{ it.html_file }}">存档</a>{% endif %}
+          </td>
         </tr>
       {% endfor %}
       </tbody>

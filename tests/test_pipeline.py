@@ -16,7 +16,7 @@ LONG_BODY = "某市持续推进智能交通建设，路口信号优化与车路�
 
 ARTICLE_HTML = ('<html><head><title>{title}</title>'
                 '<meta property="article:published_time" content="{date}T09:00:00+08:00">'
-                '</head><body><article><p>' + LONG_BODY + '</p></article></body></html>')
+                '</head><body><article><p>{body}</p></article></body></html>')
 
 FAKE_ARTICLES = [
     Article(url="https://www.sohu.com/a/1", title="车路云一体化试点启动",
@@ -37,10 +37,12 @@ class FakeCollector(Collector):
         return list(self._articles)
 
 
-def _fake_content(article, date_str="2026-08-25"):
+def _fake_content(article, date_str="2026-08-25", body: str | None = None):
+    """正文默认随标题变化（用于验证内容哈希查重只在真正重复时触发）。"""
+    text = body if body is not None else f"【{article.title}】{LONG_BODY}"
     return FetchedContent(
-        html=ARTICLE_HTML.format(title=article.title, date=date_str),
-        text=LONG_BODY, extractor="bs4",
+        html=ARTICLE_HTML.format(title=article.title, date=date_str, body=text),
+        text=text, extractor="bs4",
         meta_title=article.title, meta_date=date_str)
 
 
@@ -117,6 +119,46 @@ def test_pipeline_dry_run_no_writes(cfg, monkeypatch):
     assert stats.archived == 0
     from newsagent.archive.store import Store
     assert Store(cfg.data_dir).query(relevant_only=False) == []
+
+
+def test_pipeline_dedupes_same_title_in_batch(cfg, monkeypatch):
+    """同一批次内、来自不同源的同一篇新闻（标题相同、URL 不同）只处理一条。"""
+    articles = [
+        Article(url="https://www.mot.gov.cn/xinwen/202609/t20260910_1.html",
+                title="山西主骨架公路5年内实现数字化升级",
+                source_id="fake", source_name="交通运输部", published_at=IN_WEEK),
+        Article(url="https://www.zgjtb.com/2026-09/10/content_536613.html",
+                title="山西主骨架公路5年内实现数字化升级",
+                source_id="fake", source_name="中国交通新闻网", published_at=IN_WEEK),
+    ]
+    _patch(monkeypatch, articles=articles)
+    stats = run_pipeline(cfg, week="2026-W35")
+    assert stats.candidates == 2
+    assert stats.new_articles == 1          # 同批去重：第二条被识别为重复
+    assert stats.archived == 1 and stats.classified == 1
+
+
+def test_pipeline_dedupes_same_content(cfg, monkeypatch):
+    """标题不同但正文一致（跨源全文转载）→ 按内容哈希过滤。"""
+    articles = [
+        Article(url="https://a.com/1", title="山西公路数字化升级提速",
+                source_id="fake", source_name="源A", published_at=IN_WEEK),
+        Article(url="https://b.com/2", title="山西公路数字化升级提速转载版",
+                source_id="fake", source_name="源B", published_at=IN_WEEK),
+    ]
+    same_body = "同一篇通稿正文内容。" * 30
+
+    import newsagent.pipeline as pipe
+    monkeypatch.setattr(
+        pipe, "build_collectors",
+        lambda c: [FakeCollector(c, {"id": "fake", "name": "IT测试",
+                                     "type": "website", "limit": 10}, articles)])
+    monkeypatch.setattr(pipe, "download_and_extract",
+                        lambda a, c: _fake_content(a, body=same_body))
+    stats = run_pipeline(cfg, week="2026-W35")
+    assert stats.archived == 1
+    assert stats.duplicates == 1
+    assert stats.classified == 1
 
 
 def test_pipeline_limit_keeps_remaining(cfg, monkeypatch):

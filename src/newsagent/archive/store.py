@@ -204,6 +204,11 @@ class Store:
             conn.execute("UPDATE articles SET published_at=? WHERE guid=?",
                          (published_iso, guid))
 
+    def set_week(self, guid: str, week: str) -> None:
+        """调整条目归属周（日期兜底判定出更晚的周时使用）。"""
+        with self._connect() as conn:
+            conn.execute("UPDATE articles SET week=? WHERE guid=?", (week, guid))
+
     def set_note(self, guid: str, note: str) -> None:
         with self._connect() as conn:
             conn.execute("UPDATE articles SET note=? WHERE guid=?", (note, guid))

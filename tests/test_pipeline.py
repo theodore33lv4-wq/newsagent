@@ -173,6 +173,47 @@ def test_pipeline_limit_keeps_remaining(cfg, monkeypatch):
     assert stats3.new_articles == 0
 
 
+def test_pipeline_defers_next_week_articles(cfg, monkeypatch):
+    """周一运行采集到"新一周"的新闻（发布于目标周之后）应留待该周周报，不能被丢弃。"""
+    articles = [
+        Article(url="https://a.com/next1", title="新一周的新闻一",
+                source_id="fake", source_name="IT测试", published_at=IN_WEEK),
+    ]
+    # 目标周 W35（8/24~8/30），文章实际发布于 8/31（W36）
+    _patch(monkeypatch, articles=articles, date_str="2026-08-31")
+    stats = run_pipeline(cfg, week="2026-W35")
+    assert stats.out_of_week == 1 and stats.deferred == 1
+    assert stats.archived == 0
+
+    from newsagent.archive.store import Store
+    st = Store(cfg.data_dir)
+    rows = st.query(week="2026-W36", relevant_only=False)
+    # 归属周已修正为 W36；同一轮分类阶段顺带完成打标，留待 W36 周报使用
+    assert len(rows) == 1 and rows[0]["week"] == "2026-W36"
+    assert rows[0]["status"] == "classified" and rows[0]["relevance"] == 1
+
+    # 跑 W36 时该条正常进入 W36 周报
+    stats2 = run_pipeline(cfg, week="2026-W36")
+    assert stats2.report_paths.get("html_path") is not None
+    assert stats2.errors == []
+    assert "新一周的新闻一" in stats2.report_paths["html_path"].read_text(encoding="utf-8")
+
+
+def test_pipeline_no_new_items_not_an_error(cfg, monkeypatch):
+    """目标周已有归档条目时，本轮没有新条目属正常情况，不应报错。"""
+    articles = [
+        Article(url="https://a.com/x1", title="本周新闻",
+                source_id="fake", source_name="IT测试", published_at=IN_WEEK),
+    ]
+    _patch(monkeypatch, articles=articles)
+    assert run_pipeline(cfg, week="2026-W35").archived == 1
+    # 第二轮：无新条目，但应基于已有条目重新生成综述，且不产生错误
+    stats = run_pipeline(cfg, week="2026-W35")
+    assert stats.archived == 0
+    assert stats.report_paths.get("html_path") is not None
+    assert stats.errors == []
+
+
 def test_pipeline_regen_no_data(cfg):
     stats = run_pipeline(cfg, week="2026-W35", regen=True)
     assert stats.errors

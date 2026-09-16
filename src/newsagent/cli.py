@@ -82,8 +82,8 @@ def _print_summary(stats) -> None:
     print(f"周数        : {stats.week}")
     print(f"候选/新条目 : {stats.candidates} / {stats.new_articles}")
     print(f"存档        : 成功 {stats.archived} / 下载失败 {stats.archived_failed}")
-    print(f"过滤        : 非新闻页 {stats.rejected} / 不在目标周 {stats.out_of_week} "
-          f"/ 日期待判定 {stats.date_pending}")
+    print(f"过滤        : 非新闻页 {stats.rejected} / 早于目标周 {stats.out_of_week} "
+          f"/ 留待后续周报 {stats.deferred} / 日期待判定 {stats.date_pending}")
     if stats.reject_reasons:
         detail = "、".join(f"{k}×{v}" for k, v in stats.reject_reasons.items())
         print(f"过滤明细    : {detail}")

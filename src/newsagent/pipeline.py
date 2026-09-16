@@ -37,6 +37,7 @@ class RunStats:
     rejected: int = 0                     # 非新闻页（页面体检或模型判定）
     duplicates: int = 0                   # 正文重复（跨源转载同一篇新闻）
     out_of_week: int = 0                  # 发布日期不在目标周
+    deferred: int = 0                     # 属于更晚一周，留待该周周报
     date_pending: int = 0                 # 日期待模型判定
     reject_reasons: dict = field(default_factory=dict)
     classified: int = 0
@@ -151,10 +152,18 @@ def run_pipeline(cfg: Config, *, week: str | None = None, limit: int | None = No
             continue
         if result == "out_of_week":
             stats.out_of_week += 1
-            store.save_article(iso_week(pub_date, tz_name), article, content,
-                               status="filtered",
-                               note=f"发布日期 {pub_date} 不在目标周 {week}",
-                               published_iso=pub_date.isoformat())
+            pub_week = iso_week(pub_date, tz_name)
+            if pub_week > week:
+                # 属于更晚的一周（如周一一早发布的新闻属于新的一周）：
+                # 留档待其所在周的周报使用，不能被当作"过期新闻"丢弃
+                stats.deferred += 1
+                store.save_article(pub_week, article, content, status="archived",
+                                   note=f"发布于 {pub_date}（属 {pub_week}），留待该周周报",
+                                   published_iso=pub_date.isoformat())
+            else:
+                store.save_article(pub_week, article, content, status="filtered",
+                                   note=f"发布日期 {pub_date} 早于目标周 {week}",
+                                   published_iso=pub_date.isoformat())
             continue
 
         # 内容哈希查重：同一篇新闻被不同来源转载（标题/URL 不同，正文一致）
@@ -178,16 +187,17 @@ def run_pipeline(cfg: Config, *, week: str | None = None, limit: int | None = No
             continue
         stats.archived += 1
 
-    logger.info("存档阶段：成功 {} / 正文重复 {} / 非新闻页 {} / 不在目标周 {} / "
-                "日期待判定 {} / 下载失败 {}",
+    logger.info("存档阶段：成功 {} / 正文重复 {} / 非新闻页 {} / 不在目标周 {}"
+                "（其中留待后续周报 {}）/ 日期待判定 {} / 下载失败 {}",
                 stats.archived, stats.duplicates, stats.rejected, stats.out_of_week,
-                stats.date_pending, stats.archived_failed)
+                stats.deferred, stats.date_pending, stats.archived_failed)
 
     if stats.archived == 0 and stats.date_pending == 0:
-        stats.add_error("本周没有可用的新存档条目，跳过分类与综述")
+        logger.warning("本轮没有新的可用存档条目，将基于已有条目生成综述")
 
     # ---------- 分类（LLM 批次打标 + 日期兜底） ----------
-    rows = store.query(week=week, status="archived", relevant_only=False)
+    # 取所有待分类条目（含上周运行留待本周的），分类结果按各自周归档
+    rows = store.query(status="archived", relevant_only=False, limit=500)
     if rows:
         llm = provider or create_provider(cfg)
         tagger = Tagger(llm, cfg)
@@ -219,12 +229,17 @@ def run_pipeline(cfg: Config, *, week: str | None = None, limit: int | None = No
                     pub = _date.fromisoformat(cls.published_date)
                 except ValueError:
                     pub = None
-                if strict_week and pub and not in_target_week(pub):
-                    stats.out_of_week += 1
+                if pub is not None:
+                    pub_week = iso_week(pub, tz_name)
                     store.set_published(cls.guid, pub.isoformat())
-                    store.mark_filtered(cls.guid, f"发布日期 {pub} 不在目标周 {week}")
-                    continue
-                store.set_published(cls.guid, cls.published_date)
+                    if pub_week < week:                     # 早于目标周 → 丢弃
+                        stats.out_of_week += 1
+                        store.mark_filtered(cls.guid, f"发布日期 {pub} 早于目标周 {week}")
+                        continue
+                    if pub_week > week:                     # 属更晚的一周 → 留待该周周报
+                        stats.deferred += 1
+                        store.set_week(cls.guid, pub_week)
+                        store.set_note(cls.guid, f"发布于 {pub}（属 {pub_week}），留待该周周报")
             if cls.relevant:
                 stats.relevant += 1
                 if any(t.startswith("厂商动态") for t in cls.tags):
@@ -262,12 +277,16 @@ def run_pipeline(cfg: Config, *, week: str | None = None, limit: int | None = No
             logger.warning("周报推送异常（已忽略，不影响周报生成）: {}", exc)
 
     # ---------- 汇总与告警 ----------
+    # 只有"既没有新条目、也没有历史条目可综述"才算异常；单纯没有新条目属正常情况
+    if not stats.report_paths and stats.archived == 0 and stats.date_pending == 0:
+        stats.add_error(f"周 {week} 既无新存档条目，也没有已归档条目可生成综述")
+
     reasons = "、".join(f"{k}×{v}" for k, v in stats.reject_reasons.items()) or "无"
     logger.info("===== 流水线结束：候选 {} / 新条目 {} / 存档成功 {} / 正文重复 {} / "
-                "非新闻页 {} / 不在目标周 {} / 日期待判定 {} / 下载失败 {} / 分类 {} / "
-                "相关 {} / 厂商动态 {} / 综述 {} =====",
+                "非新闻页 {} / 不在目标周 {}（留待后续周报 {}）/ 日期待判定 {} / "
+                "下载失败 {} / 分类 {} / 相关 {} / 厂商动态 {} / 综述 {} =====",
                 stats.candidates, stats.new_articles, stats.archived, stats.duplicates,
-                stats.rejected, stats.out_of_week, stats.date_pending,
+                stats.rejected, stats.out_of_week, stats.deferred, stats.date_pending,
                 stats.archived_failed, stats.classified, stats.relevant,
                 stats.vendor, "有" if stats.report_paths else "无")
     logger.info("过滤明细：{}", reasons)

@@ -55,8 +55,9 @@ newsagent/
 ├── scripts/
 │   ├── run_weekly.py     # 每周运行入口（定时任务调用它）
 │   ├── check_env.py      # 环境自检：依赖 / 配置 / 目录 / 模型 / 各源可达性 / 渲染
-│   └── install_task.ps1  # 注册每周一 08:30 定时任务，加 -Uninstall 可移除
-├── tests/                # 50 个单元与集成测试（使用 Mock 模型，不耗额度、不联网）
+│   ├── install_task.ps1  # 注册每周一 08:30 定时任务，加 -Uninstall 可移除
+│   └── recover_filtered.py  # 数据补救：把某周被误过滤的条目恢复为待分类
+├── tests/                # 71 个单元与集成测试（使用 Mock 模型，不耗额度、不联网）
 ├── data/                 # 运行产物（已 gitignore）
 │   ├── raw/<周>/         # 原始 HTML 快照
 │   ├── articles/<周>/    # 正文与元数据 JSON
@@ -151,7 +152,10 @@ git pull
 | `python -m newsagent report --week 2026-W36` | 以子命令形式重新生成指定周周报 |
 | `check_env.py` | 环境自检 |
 | `install_task.ps1 [-Time "09:00"] [-Uninstall]` | 注册 / 调整 / 移除定时任务 |
-| `python -m pytest -q` | 运行 63 个单元与集成测试 |
+| `recover_filtered.py --week 2026-W38 [--apply]` | 列出某周被过滤的条目；加 `--apply` 恢复为待分类（数据补救，见下） |
+| `python -m pytest -q` | 运行 71 个单元与集成测试 |
+
+> **数据补救**：如果某周的新闻被误过滤（例如早期版本把"目标周之后发布"的新闻当作过期新闻丢弃），用 `recover_filtered.py --week <该周>` 先查看清单，确认后再加 `--apply` 恢复；这些条目已登记去重、不会重复下载，下次生成该周周报时会正常打标并收录。
 
 ## 五、配置要点
 

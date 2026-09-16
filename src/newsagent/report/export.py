@@ -6,7 +6,7 @@ from pathlib import Path
 
 from docx import Document
 from docx.oxml.ns import qn
-from docx.shared import Pt, RGBColor
+from docx.shared import Cm, Pt, RGBColor
 
 from .generator import ReportData
 
@@ -140,6 +140,7 @@ def to_docx(data: ReportData, path: Path) -> None:
     _heading(doc, f"附录：本周新闻清单（{len(data.items)} 条）", 1)
     table = doc.add_table(rows=1, cols=5)
     table.style = "Table Grid"
+    table.autofit = False
     headers = ["#", "标题", "来源", "日期", "重要度"]
     for cell, text in zip(table.rows[0].cells, headers):
         cell.text = ""
@@ -153,6 +154,11 @@ def to_docx(data: ReportData, path: Path) -> None:
         for cell, text in zip(row.cells, values):
             cell.text = ""
             _set_cn(cell.paragraphs[0].add_run(text), size=9.5)
+    # 固定列宽：标题列收窄、来源列加宽，避免长源名换行拥挤
+    widths = [Cm(0.9), Cm(8.3), Cm(3.2), Cm(2.2), Cm(1.9)]
+    for r in table.rows:
+        for cell, w in zip(r.cells, widths):
+            cell.width = w
 
     _para(doc, "说明：本报告由 newsagent 自动生成，仅限部门内部使用。", size=8, italic=True)
 

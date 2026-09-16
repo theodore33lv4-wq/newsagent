@@ -43,6 +43,8 @@
   table.appendix th { white-space:nowrap; }
   table.appendix td { padding:6px 8px; line-height:1.55; }
   table.appendix td.nowrap { white-space:nowrap; }
+  /* 来源列：优先单行显示，遇到超长源名时换行而不是撑破边框 */
+  table.appendix td.src { white-space:normal; word-break:break-word; }
   table.appendix td.links a { display:block; }
   .tag { display:inline-block; background:#e7f1f7; color:#0b5f8a; border-radius:3px;
          padding:0 6px; margin:1px 3px 1px 0; font-size:12px; }
@@ -154,8 +156,8 @@
     <h2>附录：本周新闻清单（{{ items|length }} 条）</h2>
     <table class="appendix">
       <colgroup>
-        <col style="width:4%"><col><col style="width:12%"><col style="width:11%">
-        <col style="width:9%"><col style="width:8%">
+        <col style="width:4%"><col style="width:51%"><col style="width:17%">
+        <col style="width:11%"><col style="width:9%"><col style="width:8%">
       </colgroup>
       <thead><tr><th>#</th><th>标题</th><th>来源</th><th>日期</th><th>重要度</th><th>链接</th></tr></thead>
       <tbody>
@@ -163,7 +165,7 @@
         <tr id="item-{{ it.idx }}">
           <td>{{ it.idx }}</td>
           <td><strong>{{ it.title }}</strong></td>
-          <td class="nowrap">{{ it.source_short or it.source_name }}</td>
+          <td class="src">{{ it.source_short or it.source_name }}</td>
           <td class="nowrap">{{ it.published_at or '—' }}</td>
           <td class="nowrap imp">{{ stars(it.importance) or '—' }}</td>
           <td class="nowrap links">

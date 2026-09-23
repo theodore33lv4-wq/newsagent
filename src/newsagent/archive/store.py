@@ -228,6 +228,41 @@ class Store:
             )
         return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
 
+    def upsert_article(self, record: dict, *, reset_classification: bool = False) -> str:
+        """按 guid 写入或更新一条条目（用于从 articles/*.json 导入历史数据）。
+
+        reset_classification=True 时把该条重置为待分类（标签树变更后重新分类用）。
+        返回 'inserted' / 'updated'。
+        """
+        guid = str(record.get("guid") or "").strip()
+        if not guid:
+            raise ValueError("record 缺少 guid")
+        with self._connect() as conn:
+            exists = conn.execute("SELECT 1 FROM articles WHERE guid=?", (guid,)).fetchone()
+            if exists:
+                fields = ["week", "url", "url_key", "title", "title_key", "source_id",
+                          "source_name", "published_at", "html_file", "text_file",
+                          "text_chars", "content_hash", "extractor"]
+                sets = [f"{k}=?" for k in fields]
+                values = [record.get(k) for k in fields]
+                if reset_classification:
+                    sets += ["status=?", "relevance=NULL", "tags_json=NULL",
+                             "summary=NULL", "keywords_json=NULL", "companies_json=NULL",
+                             "importance=NULL", "note=?"]
+                    values += [_STATUS_NEW, "已重置待分类（标签体系变更）"]
+                values.append(guid)
+                conn.execute(f"UPDATE articles SET {', '.join(sets)} WHERE guid=?", values)
+                return "updated"
+            cols = ["guid", "week", "url", "url_key", "title", "title_key",
+                    "source_id", "source_name", "published_at", "fetched_at",
+                    "html_file", "text_file", "text_chars", "content_hash",
+                    "extractor", "status", "note"]
+            values = [guid] + [record.get(k) for k in cols[1:-2]] + [_STATUS_NEW, None]
+            conn.execute(
+                f"INSERT INTO articles ({','.join(cols)}) "
+                f"VALUES ({','.join('?' * len(cols))})", values)
+            return "inserted"
+
     def set_note(self, guid: str, note: str) -> None:
         with self._connect() as conn:
             conn.execute("UPDATE articles SET note=? WHERE guid=?", (note, guid))

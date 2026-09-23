@@ -13,10 +13,12 @@ def test_load_basic(cfg):
 
 def test_taxonomy_paths(cfg):
     paths = cfg.taxonomy_paths()
-    assert "厂商动态/集成商动态" in paths
-    assert "厂商动态/设备商动态" in paths
-    assert "智慧高速" in paths           # 无子级的叶子节点
-    assert "厂商动态" not in paths       # 有子级的一级不算合法标签
+    assert "市场与项目/厂商中标与订单" in paths
+    assert "政策标准与行业/国家政策法规" in paths
+    assert "交管技术与业务/信号控制优化" in paths
+    assert "云脑与智能体/交通大模型" in paths
+    assert "边缘与终端/感知与识别设备" in paths
+    assert "市场与项目" not in paths      # 有子级的一级不算合法标签
 
 
 def test_sources_enabled_filter(cfg):

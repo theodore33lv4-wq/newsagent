@@ -18,6 +18,7 @@ from ..classify.llm import LLMProvider
 from ..classify.tagger import extract_json
 from ..utils.config import Config
 from ..utils.dates import week_label_cn
+from ..utils.tags import is_vendor_tag
 
 
 @dataclass
@@ -353,7 +354,7 @@ def _distribution(items: list[dict], nodes: list[str]) -> list[dict]:
 
 
 def _fallback_overview(items: list[dict]) -> str:
-    vendors = sum(1 for it in items if any(t.startswith("厂商动态") for t in it["tags"]))
+    vendors = sum(1 for it in items if any(is_vendor_tag(t) for t in it["tags"]))
     return (f"本周共收录 {len(items)} 条智能交通相关新闻，"
             f"其中厂商/集成商动态 {vendors} 条。"
             f"（自动降级生成：LLM 不可用时的概览）")

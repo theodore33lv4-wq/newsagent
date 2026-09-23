@@ -20,6 +20,7 @@ from .classify.llm import LLMProvider, create_provider
 from .classify.tagger import Tagger
 from .collect import build_collectors, gather_all
 from .collect.dedup import DedupChecker, content_key
+from .utils.tags import is_vendor_tag
 from .report import write_report
 from .utils.config import Config
 from .utils.dates import iso_week, target_week, week_range
@@ -53,7 +54,7 @@ class RunStats:
 
 
 def run_pipeline(cfg: Config, *, week: str | None = None, limit: int | None = None,
-                 dry_run: bool = False, regen: bool = False,
+                 dry_run: bool = False, regen: bool = False, collect: bool = True,
                  provider: LLMProvider | None = None) -> RunStats:
     week = week or target_week(None, cfg.app.get("timezone"))
     run_tag = f"{week}-dryrun" if dry_run else week
@@ -76,7 +77,11 @@ def run_pipeline(cfg: Config, *, week: str | None = None, limit: int | None = No
     # ---------- 采集与去重 ----------
     logger.info("===== newsagent 流水线启动：{}（{}）=====", week,
                 "dry-run 预览" if dry_run else "全流程")
-    candidates = gather_all(cfg, build_collectors(cfg))
+    if collect:
+        candidates = gather_all(cfg, build_collectors(cfg))
+    else:
+        logger.info("已跳过采集（--no-collect）：仅处理库中待分类条目并重新生成周报")
+        candidates = []
     stats.candidates = len(candidates)
 
     checker = DedupChecker(*store.seen_keys())
@@ -242,7 +247,7 @@ def run_pipeline(cfg: Config, *, week: str | None = None, limit: int | None = No
                         store.set_note(cls.guid, f"发布于 {pub}（属 {pub_week}），留待该周周报")
             if cls.relevant:
                 stats.relevant += 1
-                if any(t.startswith("厂商动态") for t in cls.tags):
+                if any(is_vendor_tag(t) for t in cls.tags):
                     stats.vendor += 1
             store.update_classification(
                 cls.guid, relevance=1 if cls.relevant else 0,
@@ -284,7 +289,7 @@ def run_pipeline(cfg: Config, *, week: str | None = None, limit: int | None = No
     reasons = "、".join(f"{k}×{v}" for k, v in stats.reject_reasons.items()) or "无"
     logger.info("===== 流水线结束：候选 {} / 新条目 {} / 存档成功 {} / 正文重复 {} / "
                 "非新闻页 {} / 不在目标周 {}（留待后续周报 {}）/ 日期待判定 {} / "
-                "下载失败 {} / 分类 {} / 相关 {} / 厂商动态 {} / 综述 {} =====",
+                "下载失败 {} / 分类 {} / 相关 {} / 厂商类 {} / 综述 {} =====",
                 stats.candidates, stats.new_articles, stats.archived, stats.duplicates,
                 stats.rejected, stats.out_of_week, stats.deferred, stats.date_pending,
                 stats.archived_failed, stats.classified, stats.relevant,

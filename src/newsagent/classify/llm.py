@@ -127,7 +127,7 @@ class MockLLMProvider(LLMProvider):
             idxs = [int(x) for x in re.findall(r"^###\s*(\d+)", user, re.M)] or [1]
             return json.dumps({"results": [
                 {"idx": i, "is_article": True, "published_date": None,
-                 "relevant": True, "tags": ["厂商动态/集成商动态"],
+                 "relevant": True, "tags": ["市场与项目/厂商中标与订单"],
                  "summary": "Mock 摘要：该新闻介绍某智能交通集成商中标信号控制项目。",
                  "keywords": ["信号控制", "集成商", "中标"],
                  "companies": ["中控信息", "银江技术"], "importance": 2}
@@ -139,7 +139,7 @@ class MockLLMProvider(LLMProvider):
                 "is_article": True,
                 "published_date": None,
                 "relevant": True,
-                "tags": ["厂商动态/集成商动态"],
+                "tags": ["市场与项目/厂商中标与订单"],
                 "summary": "Mock 摘要：该新闻介绍某智能交通集成商中标信号控制项目。",
                 "keywords": ["信号控制", "集成商", "中标"],
                 "companies": ["中控信息", "银江技术"],

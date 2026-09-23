@@ -6,7 +6,7 @@
 - **单条补偿**：批次里缺失或解析失败的条目，自动退回单条调用重试。
 - **多任务合一**：同一次调用里完成 是否新闻(is_article) / 发布日期(published_date) /
   相关性 / 标签 / 摘要 / 关键词 / 厂商 / 重要度。
-- 标签必须来自 taxonomy.yaml；非法标签丢弃；厂商动态类重要度有下限保障。
+- 标签必须来自 taxonomy.yaml；非法标签丢弃；厂商/集成商类重要度有下限保障。
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from loguru import logger
 
 from ..utils.config import Config
 from ..utils.dateparse import normalize_date
+from ..utils.tags import is_vendor_tag
 from .llm import LLMProvider
 
 _SINGLE_SYSTEM_TMPL = """你是智能交通领域的新闻打标助手。对给定的一条中文新闻做结构化分析，只输出一个 JSON 对象，不要输出任何其他文字或代码块标记。
@@ -46,7 +47,7 @@ _SINGLE_SYSTEM_TMPL = """你是智能交通领域的新闻打标助手。对给�
 - relevant=false 表示与智能交通无关，此时 tags 为空数组；
 - tags 只能从上述合法标签中选择，通常 1-3 个；
 - companies 只列正文明确提到的厂商/系统集成商（如中控信息、银江技术、海信网络科技、易华录、千方科技、佳都科技、华为、百度、腾讯等），没有则为空数组；
-- importance：1 一般、2 重要、3 重大；厂商动态类不低于 {vendor_floor}。"""
+- importance：1 一般、2 重要、3 重大；厂商/集成商类（含中标、订单）不低于 {vendor_floor}。"""
 
 _BATCH_SYSTEM_TMPL = """你是智能交通领域的新闻打标助手。下面会给出同一批次的多条新闻，请逐条分析并一次性输出结果。
 
@@ -65,7 +66,7 @@ _BATCH_SYSTEM_TMPL = """你是智能交通领域的新闻打标助手。下面�
 - tags：只能从上述合法标签中选择，通常 1-3 个；
 - summary：不超过 {summary_max} 字的客观摘要；
 - keywords：2-5 个关键词；companies：正文明确提到的厂商/系统集成商，没有则为空数组；
-- importance：1 一般、2 重要、3 重大；厂商动态类不低于 {vendor_floor}；
+- importance：1 一般、2 重要、3 重大；厂商/集成商类（含中标、订单）不低于 {vendor_floor}；
 - 必须覆盖输入中的全部 idx，且顺序与输入一致；除 JSON 外不要输出任何文字。"""
 
 
@@ -149,8 +150,8 @@ class Tagger:
         ok = sum(1 for c in out if c.ok)
         rel = sum(1 for c in out if c.ok and c.relevant)
         vendor = sum(1 for c in out if c.ok and c.relevant
-                     and any(t.startswith("厂商动态") for t in c.tags))
-        logger.info("打标完成：{} 条（成功 {} / 相关 {} / 厂商动态 {} / 批次 {} 个 / 单条补偿 {}）",
+                     and any(is_vendor_tag(t) for t in c.tags))
+        logger.info("打标完成：{} 条（成功 {} / 相关 {} / 厂商类 {} / 批次 {} 个 / 单条补偿 {}）",
                     len(out), ok, rel, vendor, len(batches), retried)
         return out
 
@@ -248,10 +249,10 @@ class Tagger:
         importance = self._as_int(data.get("importance")) if relevant else None
         pub = normalize_date(data.get("published_date"))
 
-        if tags and any(t.startswith("厂商动态") for t in tags) and importance is not None:
+        if tags and any(is_vendor_tag(t) for t in tags) and importance is not None:
             if importance < self._vendor_floor:
                 importance = self._vendor_floor
-                logger.debug("[{}] 厂商动态重要度提升至 {}", guid, importance)
+                logger.debug("[{}] 厂商类新闻重要度提升至 {}", guid, importance)
 
         return Classification(
             guid=guid, is_article=is_article,

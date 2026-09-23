@@ -8,6 +8,7 @@ from docx import Document
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 
+from ..utils.tags import is_vendor_tag
 from .generator import ReportData
 
 _EA_FONT = "微软雅黑"
@@ -104,7 +105,7 @@ def to_docx(data: ReportData, path: Path) -> None:
     # 厂商与集成商动态
     _heading(doc, "五、厂商与集成商动态", 1)
     vendors = [it for it in data.items
-               if any(t.startswith("厂商动态") for t in it["tags"]) or it.get("companies")]
+               if any(is_vendor_tag(t) for t in it["tags"]) or it.get("companies")]
     if vendors:
         for it in sorted(vendors, key=lambda x: x.get("importance") or 0, reverse=True):
             companies = "；".join(it.get("companies") or [])

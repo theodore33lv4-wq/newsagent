@@ -6,6 +6,7 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from ..utils.tags import is_vendor_tag
 from .generator import ReportData
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
@@ -54,7 +55,7 @@ def render_html(data: ReportData, items: list[dict] | None = None) -> str:
     def vendor_items() -> list[dict]:
         out = [
             it for it in data.items
-            if any(t.startswith("厂商动态") for t in it["tags"]) or it.get("companies")
+            if any(is_vendor_tag(t) for t in it["tags"]) or it.get("companies")
         ]
         return sorted(out, key=lambda it: it.get("importance") or 0, reverse=True)
 

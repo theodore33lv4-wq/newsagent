@@ -40,11 +40,11 @@ SOURCES_CONFIG = {
 
 TAXONOMY_CONFIG = {
     "taxonomy": [
-        {"name": "厂商动态", "children": ["集成商动态", "设备商动态"]},
-        {"name": "车路协同/智能网联", "children": ["试点城市与示范区"]},
-        {"name": "智慧高速", "children": []},
-        {"name": "政策法规", "children": []},
-        {"name": "其他", "children": []},
+        {"name": "市场与项目", "children": ["地方项目发布", "厂商中标与订单", "市场分析与综述"]},
+        {"name": "政策标准与行业", "children": ["国家政策法规", "标准规范", "展会与会议"]},
+        {"name": "交管技术与业务", "children": ["信号控制优化", "秩序与安全治理"]},
+        {"name": "云脑与智能体", "children": ["交通大模型", "智能体应用"]},
+        {"name": "边缘与终端", "children": ["感知与识别设备", "边缘计算设备"]},
     ]
 }
 

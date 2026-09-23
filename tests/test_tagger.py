@@ -21,20 +21,20 @@ def test_classify_basic(cfg):
     tag = Tagger(MockLLMProvider(), cfg)
     cls = tag.classify_one(ROW, "正文……车路协同……")
     assert cls.ok and cls.relevant is True
-    assert "厂商动态/集成商动态" in cls.tags
+    assert "市场与项目/厂商中标与订单" in cls.tags
     assert cls.importance == 2
     assert cls.companies
 
 
 def test_invalid_tags_filtered(cfg):
-    obj = {"relevant": True, "tags": ["不存在的标签", "厂商动态/集成商动态"],
+    obj = {"relevant": True, "tags": ["不存在的标签", "市场与项目/厂商中标与订单"],
            "summary": "s", "keywords": [], "companies": [], "importance": 2}
     cls = Tagger(Responder(obj), cfg).classify_one(ROW, "t")
-    assert cls.tags == ["厂商动态/集成商动态"]
+    assert cls.tags == ["市场与项目/厂商中标与订单"]
 
 
 def test_vendor_floor(cfg):
-    obj = {"relevant": True, "tags": ["厂商动态/设备商动态"], "summary": "s",
+    obj = {"relevant": True, "tags": ["市场与项目/厂商中标与订单"], "summary": "s",
            "keywords": [], "companies": [], "importance": 1}
     cls = Tagger(Responder(obj), cfg).classify_one(ROW, "t")
     assert cls.importance == 2  # 下限提升

@@ -20,6 +20,9 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
                         help="仅采集+去重预览，不做任何写入")
     parser.add_argument("--regen", action="store_true",
                         help="跳过采集，仅重新生成指定周综述")
+    parser.add_argument("--no-collect", action="store_true",
+                        help="跳过采集：仅对库中待分类条目重新打标并生成周报"
+                             "（标签体系调整后常用）")
     parser.add_argument("--provider", default=None,
                         choices=["mock", "openai-compat", "ollama"],
                         help="临时覆盖 llm.provider")
@@ -71,6 +74,7 @@ def main(argv: list[str] | None = None) -> int:
         limit=limit if limit and limit > 0 else None,
         dry_run=getattr(args, "dry_run", False),
         regen=getattr(args, "regen", False),
+        collect=not getattr(args, "no_collect", False),
     )
     _print_summary(stats)
     return 0 if not stats.errors else 1
@@ -88,7 +92,7 @@ def _print_summary(stats) -> None:
         detail = "、".join(f"{k}×{v}" for k, v in stats.reject_reasons.items())
         print(f"过滤明细    : {detail}")
     print(f"分类        : {stats.classified} 条（相关 {stats.relevant}，"
-          f"厂商动态 {stats.vendor}，待人工 {stats.classify_failed}）")
+          f"厂商类 {stats.vendor}，待人工 {stats.classify_failed}）")
     if stats.report_paths:
         html = stats.report_paths.get("html_path")
         docx = stats.report_paths.get("docx_path")

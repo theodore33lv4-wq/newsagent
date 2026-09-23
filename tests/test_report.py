@@ -10,11 +10,11 @@ from newsagent.report.render import render_html
 
 ROWS = [
     {"guid": "a1", "title": "某市启动车路云一体化试点", "source_name": "ITS114智慧交通",
-     "published_at": "2026-08-24", "tags": ["车路协同/智能网联", "试点城市与示范区"],
+     "published_at": "2026-08-24", "tags": ["云脑与智能体/交通大模型", "交管技术与业务/信号控制优化"],
      "companies": ["华为"], "importance": 3, "summary": "试点启动。",
      "url": "https://www.sohu.com/a/1", "html_file": "raw/2026-W35/x.html"},
     {"guid": "a2", "title": "中控信息中标信号控制项目", "source_name": "赛文交通网",
-     "published_at": "2026-08-25", "tags": ["厂商动态/集成商动态"],
+     "published_at": "2026-08-25", "tags": ["市场与项目/厂商中标与订单"],
      "companies": ["中控信息"], "importance": 2, "summary": "中标。",
      "url": "https://www.7its.com/a/2", "html_file": None},
 ]
@@ -25,7 +25,7 @@ def test_generate_mock(cfg):
     assert data.themes and not data.fallback
     # 主题 = 确定性复用打标 level-1 标签（数量降序、名称升序）
     titles = [t["title"] for t in data.themes]
-    assert titles == ["厂商动态", "车路协同/智能网联"]
+    assert titles == ["云脑与智能体", "市场与项目"]
     # 每条要点来自 LLM（Mock notes），完整保留不截断
     all_notes = "".join(it["note"] for t in data.themes for it in t["items"])
     assert "常态化阶段" in all_notes
@@ -51,15 +51,15 @@ def test_report_layer_dedupe(cfg):
     """报告层查重：标题相同的跨源转载只保留一条。"""
     rows = [
         {"guid": "d1", "title": "山西主骨架公路5年内实现数字化升级",
-         "source_name": "交通运输部", "published_at": "2026-09-10", "tags": ["政策法规"],
+         "source_name": "交通运输部", "published_at": "2026-09-10", "tags": ["政策标准与行业/国家政策法规"],
          "companies": [], "importance": 2, "summary": "s", "url": "https://a/1",
          "html_file": None, "content_hash": "h1"},
         {"guid": "d2", "title": "山西主骨架公路5年内实现数字化升级",
-         "source_name": "中国交通新闻网", "published_at": "2026-09-10", "tags": ["政策法规"],
+         "source_name": "中国交通新闻网", "published_at": "2026-09-10", "tags": ["政策标准与行业/国家政策法规"],
          "companies": [], "importance": 2, "summary": "s", "url": "https://b/2",
          "html_file": None, "content_hash": "h2"},
         {"guid": "d3", "title": "城市摆渡人变身治理合伙人",
-         "source_name": "交通运输部", "published_at": "2026-09-11", "tags": ["智能公交/出租"],
+         "source_name": "交通运输部", "published_at": "2026-09-11", "tags": ["交管技术与业务/信号控制优化"],
          "companies": [], "importance": 1, "summary": "s", "url": "https://a/3",
          "html_file": None, "content_hash": "h3"},
     ]
@@ -105,14 +105,14 @@ def test_themes_reuse_level1_tags(cfg):
     prov = NoLLM()
     data = generate(cfg, prov, "2026-W35", ROWS, "now")
     titles = {t["title"] for t in data.themes}
-    assert titles == {"厂商动态", "车路协同/智能网联"}
+    assert titles == {"云脑与智能体", "市场与项目"}
     assert data.fallback is True      # 综述降级（要点用摘要兜底）
     assert prov.calls == 1            # 要点与综述已合并为一次调用；归类零调用
 
     # 主题与附录标签一致（同一条新闻不会出现"归类冲突"）
     idx2_theme = next(t["title"] for t in data.themes
                       for it in t["items"] if it["idx"] == 2)
-    assert idx2_theme == "厂商动态"
+    assert idx2_theme == "市场与项目"
 
 
 def test_generate_fallback(cfg):

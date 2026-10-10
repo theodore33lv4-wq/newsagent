@@ -39,13 +39,14 @@ class OpenAICompatProvider(LLMProvider):
 
     def __init__(self, base_url: str, api_key: str, model: str,
                  timeout: float = 120.0, max_retries: int = 2,
-                 temperature: float = 0.2):
+                 temperature: float = 0.2, max_tokens: int | None = None):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
         self.max_retries = max_retries
         self.temperature = temperature
+        self.max_tokens = max_tokens
 
     def chat(self, messages: list[dict], *, json_mode: bool = False,
              temperature: float | None = None, model: str | None = None) -> str:
@@ -54,6 +55,8 @@ class OpenAICompatProvider(LLMProvider):
             "messages": messages,
             "temperature": self.temperature if temperature is None else temperature,
         }
+        if self.max_tokens:
+            body["max_tokens"] = int(self.max_tokens)
         if json_mode:
             body["response_format"] = {"type": "json_object"}
 
@@ -204,6 +207,7 @@ def create_provider(cfg: Config) -> LLMProvider:
         temperature=temperature,
         timeout=timeout,
         max_retries=max_retries,
+        max_tokens=int(cfg.llm["max_tokens"]) if cfg.llm.get("max_tokens") else None,
     )
     logger.debug("使用 OpenAICompatProvider (base_url={}, model={})",
                  cfg.llm.get("base_url"), model)

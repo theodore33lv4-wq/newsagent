@@ -18,3 +18,6 @@ data/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# 本地审阅/工作文档（不纳入版本管理）
+DEEPSEEK_REVIEW.md

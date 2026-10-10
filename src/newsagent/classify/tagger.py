@@ -21,6 +21,7 @@ from loguru import logger
 
 from ..utils.config import Config
 from ..utils.dateparse import normalize_date
+from ..utils.jsonrepair import parse_json_lenient
 from ..utils.tags import is_vendor_tag
 from .llm import LLMProvider
 
@@ -165,7 +166,7 @@ class Tagger:
             except Exception as exc:
                 return Classification(guid=guid, ok=False,
                                       error=f"LLM 调用失败: {exc}", raw=str(exc))
-            data = extract_json(raw)
+            data = extract_json(raw) or parse_json_lenient(raw)
             if data is not None:
                 return self._parse_payload(guid, data, raw)
             logger.warning("[{}] 第 {} 次输出无法解析为 JSON，重试", guid, attempt + 1)
@@ -200,7 +201,7 @@ class Tagger:
         ]
         try:
             raw = self.provider.chat(messages, json_mode=True)
-            data = extract_json(raw)
+            data = extract_json(raw) or parse_json_lenient(raw)
             if not data:
                 logger.warning("批次输出无法解析为 JSON（{} 条），将单条重试", len(batch))
                 return {}

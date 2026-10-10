@@ -16,6 +16,7 @@ from loguru import logger
 
 from ..classify.llm import LLMProvider
 from ..classify.tagger import extract_json
+from ..utils.jsonrepair import parse_json_lenient
 from ..utils.config import Config
 from ..utils.dates import week_label_cn
 from ..utils.tags import is_vendor_tag
@@ -270,12 +271,27 @@ def _compose_all(cfg: Config, provider: LLMProvider, items: list[dict],
         {"role": "system", "content": system},
         {"role": "user", "content": f"本周按主题分组的新闻清单：\n{theme_text}"},
     ]
-    try:
-        raw = provider.chat(messages, json_mode=True, model=cfg.report_model)
-        data = extract_json(raw)
-        if not data:
-            logger.warning("综述调用未返回有效 JSON，使用降级内容")
+    retries = int(cfg.report.get("json_retries", 1))
+    data = None
+    for attempt in range(retries + 1):
+        try:
+            raw = provider.chat(messages, json_mode=True, model=cfg.report_model)
+        except Exception as exc:
+            logger.warning("综述调用失败（第 {} 次）: {}", attempt + 1, exc)
             return {}
+        data = extract_json(raw) or parse_json_lenient(raw)
+        if data:
+            break
+        logger.warning("综述输出无法解析为 JSON（第 {} 次，{} 字符）：{}",
+                       attempt + 1, len(raw or ""), (raw or "")[:120].replace("\n", " "))
+        messages = messages + [{
+            "role": "user",
+            "content": "注意：你上一次的输出无法被解析为 JSON。请重新输出，且只输出一个合法的 JSON 对象。",
+        }]
+    if not data:
+        logger.warning("综述调用多次输出均无法解析，使用降级内容")
+        return {}
+    try:
         notes: dict[int, str] = {}
         for n in data.get("notes") or []:
             try:
@@ -302,7 +318,7 @@ def _compose_all(cfg: Config, provider: LLMProvider, items: list[dict],
             "next_week": _str_list(data.get("next_week")),
         }
     except Exception as exc:
-        logger.warning("综述调用失败，使用降级内容: {}", exc)
+        logger.warning("综述结果解析失败，使用降级内容: {}", exc)
         return {}
 
 

@@ -85,7 +85,6 @@ def test_long_notes_not_truncated(cfg):
                 "top5": [1], "trends": {"macro": ["m"], "projects": ["p"], "vendor_advice": ["v"]},
                 "next_week": ["n"],
             }, ensure_ascii=False)
-
     data = generate(cfg, LongNoteProvider(), "2026-W35", ROWS, "now")
     notes = [it["note"] for t in data.themes for it in t["items"]]
     assert notes and all(n == long_note for n in notes)
@@ -165,3 +164,47 @@ def test_write_report(cfg):
     assert "智能交通新闻周报" in html
     assert "类别分布" in html
     assert "存档" in html
+
+
+def test_report_retries_on_bad_json(cfg):
+    """综述输出无法解析时应自动重试一次，而不是直接降级。"""
+    import json as _json
+
+    class FlakyProvider:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages, **kw):
+            self.calls += 1
+            if self.calls == 1:
+                return "这不是 JSON，模型偶发输出异常"
+            return _json.dumps({
+                "notes": [{"idx": i, "note": f"第 {i} 条要点内容，描述具体事实与看点。"}
+                          for i in (1, 2)],
+                "overview": "本周概览正文。", "overview_points": ["要点一"],
+                "top5": [1], "trends": {"macro": ["宏观"], "projects": ["项目"],
+                                        "vendor_advice": ["建议"]},
+                "next_week": ["关注"],
+            }, ensure_ascii=False)
+
+    prov = FlakyProvider()
+    data = generate(cfg, prov, "2026-W35", ROWS, "now")
+    assert prov.calls == 2                 # 第一次失败 → 重试一次
+    assert data.fallback is False          # 未降级
+    assert data.overview == "本周概览正文。"
+    assert data.trends_projects == ["项目"]
+
+
+def test_report_falls_back_after_retries(cfg):
+    """多次都无法解析时才降级，且周报仍可产出。"""
+    class BrokenProvider:
+        calls = 0
+
+        def chat(self, messages, **kw):
+            BrokenProvider.calls += 1
+            return "仍然不是 JSON"
+
+    data = generate(cfg, BrokenProvider(), "2026-W35", ROWS, "now")
+    assert BrokenProvider.calls == 2       # 1 次 + json_retries(1)
+    assert data.fallback is True
+    assert data.overview and data.themes    # 降级内容仍然完整

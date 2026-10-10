@@ -13,6 +13,7 @@ llm:
   temperature: 0.2
   timeout_seconds: 120
   max_retries: 2
+  max_tokens: 8192               # 单次输出上限（避免条目多时 JSON 被截断）
   tagger_model: null             # 置为模型名可单独指定打标模型（null = 用 model）
   report_model: null             # 置为模型名可单独指定综述模型（null = 用 model）
 
@@ -47,6 +48,7 @@ archive:
 report:
   max_items: 120                 # 综述输入条目上限（超出按重要度截断）
   summary_max_chars: 200         # 输入 LLM 的单条摘要防御性上限（打标摘要约 100 字，通常不触发；截断不加省略号）
+  json_retries: 1                # 综述输出无法解析时的重试次数
   formats: ["html", "docx"]      # 输出格式（html 为自包含单文件）
   schedule_note: "每周一 08:00（Windows 任务计划程序）"
 

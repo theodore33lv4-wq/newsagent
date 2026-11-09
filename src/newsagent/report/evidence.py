@@ -62,7 +62,7 @@ def _supported(claim: str, sources: list[list[str]]) -> bool:
     )
 
 
-def check_composition(composed: dict, items: list[dict]) -> int:
+def check_composition(composed: dict, items: list[dict], *, require_refs: bool = False) -> int:
     """就地保留可核对的文字。单条事实无效时回退到引用条目的原摘要。"""
     if not composed:
         return 0
@@ -80,20 +80,20 @@ def check_composition(composed: dict, items: list[dict]) -> int:
         if note_idx is not None and not refs:
             refs = {note_idx}
         valid = refs <= evidence.keys() and (note_idx is None or refs == {note_idx})
-        if valid and _supported(claim, [evidence[idx] for idx in refs]):
+        if valid and (refs or not require_refs) and _supported(claim, [evidence[idx] for idx in refs]):
             return claim
         adjustments += 1
-        if allow_summary and valid and len(refs) == 1:
+        if allow_summary and not require_refs and valid and len(refs) == 1:
             idx = next(iter(refs))
             if summary := by_idx[idx]["summary"].strip():
                 return f"{summary.rstrip('。')} [{idx}]。"
         return ""
 
     composed["overview"] = "".join(
-        checked(sentence, allow_summary=True)
+        checked(sentence, allow_summary=True) if sentence.strip() else sentence
         for sentence in _SENTENCE.split(composed.get("overview", ""))
     )
-    for key in ("overview_points", "trends_macro", "trends_projects", "trends_vendor", "next_week"):
+    for key in ("overview_points", "trends_macro", "trends_projects", "trends_vendor", "next_week", "next_month"):
         allow_summary = key in ("overview_points", "trends_macro", "trends_projects")
         composed[key] = [safe for claim in composed.get(key, [])
                          if (safe := checked(claim, allow_summary=allow_summary))]

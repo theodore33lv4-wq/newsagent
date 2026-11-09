@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import closing, contextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -19,6 +19,7 @@ from loguru import logger
 
 from ..collect.base import Article
 from ..collect.dedup import content_key, title_key, url_key
+from ..utils.dates import iso_week, stored_date
 from .downloader import MAX_TEXT_CHARS, FetchedContent
 
 _STATUS_NEW = "archived"          # 已存档，待分类
@@ -36,17 +37,23 @@ def guid_for(url: str) -> str:
 class Store:
     """SQLite 索引 + 文件系统存档。线程安全（线程内自建连接）。"""
 
-    def __init__(self, data_dir: Path):
+    def __init__(self, data_dir: Path, *, read_only: bool = False):
         self.data_dir = Path(data_dir)
+        self.db_path = self.data_dir / "index.sqlite3"
+        self.read_only = read_only
+        if read_only:
+            if not self.db_path.is_file():
+                raise FileNotFoundError(f"未找到新闻归档索引: {self.db_path}")
+            return
         self.data_dir.mkdir(parents=True, exist_ok=True)
         (self.data_dir / "raw").mkdir(exist_ok=True)
         (self.data_dir / "articles").mkdir(exist_ok=True)
-        self.db_path = self.data_dir / "index.sqlite3"
         self._init_schema()
 
     @contextmanager
     def _connect(self):
-        with closing(sqlite3.connect(self.db_path)) as conn:
+        database = self.db_path.resolve().as_uri() + "?mode=ro" if self.read_only else self.db_path
+        with closing(sqlite3.connect(database, uri=self.read_only)) as conn:
             conn.row_factory = sqlite3.Row
             with conn:
                 yield conn
@@ -350,6 +357,33 @@ class Store:
     def get_week(self, week: str, *, classified_only: bool = True) -> list[dict]:
         rows = self.query(week=week, relevant_only=classified_only, limit=-1,
                           status=_STATUS_CLASSIFIED if classified_only else None)
+        return self._with_report_hashes(rows)
+
+    def get_month(self, start: date, end: date, tz_name: str | None) -> tuple[list[dict], int, int]:
+        """按本地发布日期取数，并统计归档中待处理和日期无法确认的候选条目。"""
+        rows = []
+        pending = undated = 0
+        first_week, last_week = iso_week(start), iso_week(end)
+        with self._connect() as conn:
+            records = conn.execute(
+                """SELECT * FROM articles WHERE status IN (?, ?, ?)
+                   OR (status=? AND relevance=1)
+                   ORDER BY importance DESC NULLS LAST, published_at DESC, guid""",
+                (_STATUS_NEW, _STATUS_RETRY, _STATUS_DATE_PENDING, _STATUS_CLASSIFIED),
+            )
+            for record in records:
+                day = stored_date(record["published_at"], tz_name)
+                if day is None:
+                    if first_week <= record["week"] <= last_week:
+                        undated += 1
+                elif start <= day <= end:
+                    if record["status"] == _STATUS_CLASSIFIED:
+                        rows.append(_row_to_dict(record))
+                    else:
+                        pending += 1
+        return self._with_report_hashes(rows), pending, undated
+
+    def _with_report_hashes(self, rows: list[dict]) -> list[dict]:
         for row in rows:
             if not (row.get("content_hash") or "").startswith("v2:"):
                 body = self.article_text(row)

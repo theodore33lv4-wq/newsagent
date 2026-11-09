@@ -109,7 +109,7 @@ class MockLLMProvider(LLMProvider):
     """确定性 Mock：按系统提示词内容返回可被下游解析的 JSON。
 
     - 系统提示词含「新闻打标」→ 返回单条打标结果
-    - 系统提示词含「周报综述」→ 返回综述大纲
+    - 系统提示词含「周报综述」或「月报综述」→ 返回综述大纲
     - 其余 → {"ok": true}
     单元测试可显式传入 responder 覆盖默认行为。
     """
@@ -172,6 +172,19 @@ class MockLLMProvider(LLMProvider):
                     "vendor_advice": ["集成商应加快车路云产品线储备。", "建议布局信号控制AI优化方向。"],
                 },
                 "next_week": ["关注新一批试点名单"],
+            }, ensure_ascii=False)
+        if "月报综述" in system:
+            evidence = json.loads(user)["themes"]
+            items = [item for group in evidence for item in group["items"]]
+            first = items[0]
+            project_items = [it for it in items if "项目" in it["title"]][:3]
+            return json.dumps({
+                "overview": f"归档示例：{first['title']} [{first['idx']}]。",
+                "overview_points": [f"{it['title']} [{it['idx']}]" for it in items[:5]],
+                "top5": [it["idx"] for it in items[:5]],
+                "trends_macro": [], "trends_vendor": [],
+                "projects": [{"name": it["title"], "indices": [it["idx"]]} for it in project_items],
+                "next_month": [f"关注「{it['title']}」的后续公告 [{it['idx']}]" for it in project_items],
             }, ensure_ascii=False)
         return json.dumps({"ok": True}, ensure_ascii=False)
 

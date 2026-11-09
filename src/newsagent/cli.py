@@ -1,13 +1,17 @@
-"""newsagent CLI：python -m newsagent [pipeline|report] [选项]。"""
+"""newsagent CLI：python -m newsagent [pipeline|report|monthly] [选项]。"""
 
 from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from loguru import logger
 
 from .utils.config import Config
+
+
+_PROVIDERS = ("mock", "openai-compat", "ollama")
 
 
 def _add_common(parser: argparse.ArgumentParser) -> None:
@@ -23,7 +27,7 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
                         help="跳过采集：仅对库中待分类条目重新打标并生成周报"
                              "（标签体系调整后常用）")
     parser.add_argument("--provider",
-                        choices=["mock", "openai-compat", "ollama"],
+                        choices=_PROVIDERS,
                         help="临时覆盖 llm.provider")
     parser.add_argument("--log-level", type=str.upper,
                         choices=["TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"],
@@ -42,6 +46,14 @@ def main(argv: list[str] | None = None) -> int:
     _add_common(common)
     sub.add_parser("pipeline", help="运行每周流水线", parents=[common])
     sub.add_parser("report", help="仅生成综述", parents=[common])
+    monthly = sub.add_parser("monthly", help="基于本地归档生成月报")
+    monthly.add_argument("--month", required=True, help="自然月（如 2026-10）")
+    monthly.add_argument("--data-dir", type=Path, help="指定归档与报告目录，默认使用项目配置")
+    model = monthly.add_mutually_exclusive_group()
+    model.add_argument("--provider", choices=_PROVIDERS, default=argparse.SUPPRESS,
+                       help="默认使用配置中的模型，可能调用 API。指定 mock 可离线预览")
+    model.add_argument("--use-configured-model", dest="provider", action="store_const",
+                       const=None, default=argparse.SUPPRESS, help=argparse.SUPPRESS)
 
     args = parser.parse_args(argv)
 
@@ -53,6 +65,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.provider:
         cfg.llm["provider"] = args.provider
+
+    if args.command == "monthly":
+        return _run_monthly(cfg, args)
 
     from .pipeline import run_pipeline
 
@@ -74,6 +89,34 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     _print_summary(stats, dry_run=args.dry_run)
     return 0 if not stats.errors else 1
+
+
+def _run_monthly(cfg: Config, args: argparse.Namespace) -> int:
+    from .classify.llm import create_provider
+    from .report import write_monthly_report
+    from .utils.dates import month_range
+
+    try:
+        month_range(args.month)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    if args.data_dir is not None:
+        cfg.data_dir = args.data_dir.resolve()
+    try:
+        paths = write_monthly_report(cfg, create_provider(cfg), args.month)
+    except Exception as exc:
+        logger.error("月报生成失败: {}", exc)
+        return 1
+    data = paths["data"]
+    print(f"{args.month} 月报{'模拟预览' if data.preview else ''}，收录 {data.relevant_count} 条")
+    print(data.coverage_note)
+    if data.review_note:
+        print(data.review_note)
+    for key, path in paths.items():
+        if key.endswith("_path"):
+            print(path)
+    return 1 if data.fallback else 0
 
 
 def _print_summary(stats, *, dry_run: bool = False) -> None:

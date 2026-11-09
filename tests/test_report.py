@@ -2,6 +2,8 @@
 
 import zipfile
 
+from bs4 import BeautifulSoup
+
 from newsagent.classify.llm import MockLLMProvider
 from newsagent.report import write_report
 from newsagent.report.export import to_docx
@@ -150,6 +152,26 @@ def test_render_html_with_html_link(cfg):
     items = [dict(it, html_link="../../raw/2026-W35/x.html") for it in data.items]
     html = render_html(data, items=items)
     assert 'href="../../raw/2026-W35/x.html"' in html  # 存档相对路径可点击
+
+
+def test_render_citation_numbers_as_safe_original_links(cfg):
+    original = "https://example.com/news?id=1&from=report"
+    rows = [{**ROWS[0], "url": original}, {**ROWS[1], "url": "javascript:alert(1)"}]
+    data = generate(cfg, MockLLMProvider(), "2026-W35", rows, "now")
+    data.overview = "<script>test</script> 见 [1][2][999]"
+    data.overview_points = ["要点 [1]"]
+    data.trends_macro = ["市场 [1]"]
+    data.trends_projects = ["项目 [1]"]
+    data.trends_vendor = ["建议 [1]"]
+    data.next_week = ["关注 [1]"]
+    html = BeautifulSoup(render_html(data), "lxml")
+
+    links = html.select("a.citation")
+    assert len(links) == 6
+    assert all(a.get_text() == "[1]" and a["href"] == original for a in links)
+    assert all(a["target"] == "_blank" and "noopener" in a["rel"] for a in links)
+    assert html.select_one(".overview p").get_text() == "<script>test</script> 见 [1][2][999]"
+    assert html.find("script") is None
 
 
 def test_export_docx(cfg, tmp_path):

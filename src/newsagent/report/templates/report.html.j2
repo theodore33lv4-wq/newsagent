@@ -3,12 +3,21 @@
   {% if url %}<a href="{{ url }}" target="_blank" rel="noopener">{{ item_title(idx) }}</a>
   {%- else %}{{ item_title(idx) }}{% endif %}
 {%- endmacro %}
+{% macro cited_text(text) -%}
+  {%- for part, url in citation_parts(text) -%}
+    {%- if url -%}
+      <a class="citation" href="{{ url }}" target="_blank" rel="noopener">{{ part }}</a>
+    {%- else -%}
+      {{ part }}
+    {%- endif -%}
+  {%- endfor -%}
+{%- endmacro %}
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>智能交通周报 {{ week }} · newsagent</title>
+<title>智能交通{{ unit }}报 {{ period }} · newsagent</title>
 <style>
   :root { --primary:#0b5f8a; --accent:#c2701d; --bg:#f5f7f9; --line:#dde4ea; }
   * { box-sizing: border-box; }
@@ -55,23 +64,25 @@
          padding:0 6px; margin:1px 3px 1px 0; font-size:12px; }
   .imp { color:var(--accent); font-weight:bold; }
   a { color:#0b5f8a; text-decoration:none; } a:hover { text-decoration:underline; }
+  a.citation { text-decoration:underline; }
   .footnote { color:#7c8b96; font-size:12px; margin-top:14px; }
 </style>
 </head>
 <body>
 <div class="page">
   <header>
-    <h1>智能交通新闻周报</h1>
-    <div class="meta">{{ week_label }} ｜ 生成时间：{{ generated_at }} ｜
+    <h1>智能交通新闻{{ unit }}报{% if preview %}（模拟预览）{% endif %}</h1>
+    <div class="meta">{{ period_label }} ｜ 生成时间：{{ generated_at }} ｜
       收录 {{ relevant_count }} 条 / 来源 {{ source_count }} 个</div>
   </header>
 
   <section class="overview">
-    <h2>本周概览</h2>
-    <p>{{ overview }}</p>
+    <h2>{% if monthly %}本月判断{% else %}本周概览{% endif %}</h2>
+    {% if coverage_note %}<p class="footnote">{{ coverage_note }}</p>{% endif %}
+    <p>{{ cited_text(overview) }}</p>
     {% if overview_points %}
     <ul>
-      {% for pt in overview_points %}<li>{{ pt }}</li>{% endfor %}
+      {% for pt in overview_points %}<li>{{ cited_text(pt) }}</li>{% endfor %}
     </ul>
     {% endif %}
     {% if review_note %}<p class="footnote">{{ review_note }}</p>{% endif %}
@@ -109,7 +120,7 @@
   </section>
 
   <section>
-    <h2>本周 TOP{% if top5 %}{{ top5|length }}{% else %}5{% endif %}</h2>
+    <h2>本{{ unit }} TOP{% if top5 %}{{ top5|length }}{% else %}5{% endif %}</h2>
     <ol>
       {% for idx in top5 %}
       <li>{{ article_link(idx) }}
@@ -129,36 +140,52 @@
             {% for c in it.companies %}<span class="tag">{{ c }}</span>{% endfor %}</li>
         {% endfor %}
       {% else %}
-        <li>本周没有明显的厂商/集成商动态条目。</li>
+        <li>本{{ unit }}没有明显的厂商/集成商动态条目。</li>
       {% endif %}
     </ul>
   </section>
 
   <section>
     <h2>趋势观察</h2>
-    <h3>宏观市场动态</h3>
+    <h3>{% if monthly %}政策与市场{% else %}宏观市场动态{% endif %}</h3>
     <ul class="trends">
-      {% for t in trends_macro %}<li>{{ t }}</li>{% else %}<li>（无）</li>{% endfor %}
+      {% for t in trends_macro %}<li>{{ cited_text(t) }}</li>{% else %}<li>（无）</li>{% endfor %}
     </ul>
+    {% if not monthly %}
     <h3>重点工程与项目</h3>
     <ul class="trends">
-      {% for t in trends_projects %}<li>{{ t }}</li>{% else %}<li>（无）</li>{% endfor %}
+      {% for t in trends_projects %}<li>{{ cited_text(t) }}</li>{% else %}<li>（无）</li>{% endfor %}
     </ul>
+    {% endif %}
     <h3>集成商产品规划建议</h3>
     <ul class="trends">
-      {% for t in trends_vendor %}<li>{{ t }}</li>{% else %}<li>（无）</li>{% endfor %}
+      {% for t in trends_vendor %}<li>{{ cited_text(t) }}</li>{% else %}<li>（无）</li>{% endfor %}
     </ul>
   </section>
 
+  {% if monthly %}
+  <section class="projects">
+    <h2>重点项目进展</h2>
+    {% for project in projects %}
+    <h3>{{ project.name }}</h3>
+    <ul class="trends">
+      {% for idx in project.indices %}
+      <li>{{ by_idx[idx].published_at }} ｜ {{ by_idx[idx].title }} {{ cited_text('[' ~ idx ~ ']') }}</li>
+      {% endfor %}
+    </ul>
+    {% else %}<p>（无）</p>{% endfor %}
+  </section>
+  {% endif %}
+
   <section>
-    <h2>下周关注</h2>
+    <h2>下{{ unit }}关注</h2>
     <ul class="next">
-      {% for n in next_week %}<li>{{ n }}</li>{% else %}<li>（无）</li>{% endfor %}
+      {% for n in follow_up %}<li>{{ cited_text(n) }}</li>{% else %}<li>（无）</li>{% endfor %}
     </ul>
   </section>
 
   <section>
-    <h2>附录：本周新闻清单（{{ items|length }} 条）</h2>
+    <h2>附录：本{{ unit }}新闻清单（{{ items|length }} 条）</h2>
     <table class="appendix">
       <colgroup>
         <col style="width:4%"><col style="width:51%"><col style="width:17%">

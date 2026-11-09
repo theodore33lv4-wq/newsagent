@@ -24,13 +24,9 @@ from ..utils.tags import is_vendor_tag
 from .evidence import check_composition
 
 
-@dataclass
-class ReportData:
-    """一份可渲染的周报数据（HTML/Word 共用同一数据源）。"""
-
-    week: str
-    week_label: str
-    generated_at: str
+@dataclass(kw_only=True)
+class ReportContent:
+    """周报和月报共用的内容。"""
     total_count: int = 0
     relevant_count: int = 0
     source_count: int = 0
@@ -42,7 +38,6 @@ class ReportData:
     trends_macro: list[str] = field(default_factory=list)     # 趋势·宏观市场动态
     trends_projects: list[str] = field(default_factory=list)  # 趋势·重点工程与项目
     trends_vendor: list[str] = field(default_factory=list)    # 趋势·集成商产品规划建议
-    next_week: list[str] = field(default_factory=list)
     items: list[dict] = field(default_factory=list)    # 附录清单
     fallback: bool = False                              # 是否走降级生成
     evidence_adjustments: int = 0                        # 证据不足而替换或移除的表述数
@@ -60,6 +55,25 @@ class ReportData:
             if it.get("idx") == idx:
                 return it
         return None
+
+
+@dataclass
+class ReportData(ReportContent):
+    week: str
+    week_label: str
+    generated_at: str
+    next_week: list[str] = field(default_factory=list)
+
+
+@dataclass
+class MonthlyReportData(ReportContent):
+    month: str
+    month_label: str
+    generated_at: str
+    projects: list[dict] = field(default_factory=list)  # {name, indices}，按报道日期排序
+    next_month: list[str] = field(default_factory=list)
+    coverage_note: str = ""
+    preview: bool = False
 
 
 def _truncate(s: str, n: int) -> str:

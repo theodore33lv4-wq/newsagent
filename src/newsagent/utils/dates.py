@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+from calendar import monthrange
 from datetime import date, datetime, time, timedelta, timezone
 
 try:
@@ -66,7 +68,6 @@ def target_week(dt: datetime | date | None = None, tz_name: str | None = None) -
 
 def week_range(week: str, tz_name: str | None = None) -> tuple[datetime, datetime]:
     """周编号 → (周一 00:00, 周日 23:59:59)（本地时区 aware datetime）。"""
-    import re
     m = re.match(r"^(\d{4})-W?(\d{1,2})$", week.strip())
     if not m:
         raise ValueError(f"周编号格式非法: {week!r}（应为 2026-W09）")
@@ -85,3 +86,11 @@ def week_label_cn(week: str, tz_name: str | None = None) -> str:
     fmt = "%m月%d日"
     iso = start.isocalendar()
     return f"{iso.year}年第{iso.week}周（{start.strftime(fmt)}—{end.strftime(fmt)}）"
+
+
+def month_range(month: str) -> tuple[date, date]:
+    """自然月的首尾日期（均包含）。"""
+    if not re.fullmatch(r"[0-9]{4}-(?:0[1-9]|1[0-2])", month):
+        raise ValueError(f"月份格式非法: {month!r}（应为 2026-10）")
+    year, number = map(int, month.split("-"))
+    return date(year, number, 1), date(year, number, monthrange(year, number)[1])

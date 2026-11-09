@@ -9,7 +9,7 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 
 from ..utils.tags import is_vendor_tag
-from .generator import ReportData
+from .generator import MonthlyReportData, ReportData
 
 _EA_FONT = "微软雅黑"
 _LATIN_FONT = "Calibri"
@@ -48,7 +48,12 @@ def _bullet(doc, left: str, body: str) -> None:
     _set_cn(run)
 
 
-def to_docx(data: ReportData, path: Path) -> None:
+def to_docx(data: ReportData | MonthlyReportData, path: Path) -> None:
+    monthly = isinstance(data, MonthlyReportData)
+    unit = "月" if monthly else "周"
+    period = data.month if monthly else data.week
+    period_label = data.month_label if monthly else data.week_label
+    preview = "（模拟预览）" if monthly and data.preview else ""
     doc = Document()
     normal = doc.styles["Normal"]
     normal.font.name = _LATIN_FONT
@@ -56,13 +61,15 @@ def to_docx(data: ReportData, path: Path) -> None:
     normal._element.rPr.rFonts.set(qn("w:eastAsia"), _EA_FONT)
 
     # 标题与元信息
-    _heading(doc, f"智能交通新闻周报 {data.week}", 0)
-    _para(doc, f"{data.week_label} ｜ 生成时间：{data.generated_at} ｜ "
+    _heading(doc, f"智能交通新闻{unit}报 {period}{preview}", 0)
+    _para(doc, f"{period_label} ｜ 生成时间：{data.generated_at} ｜ "
                f"收录 {data.relevant_count} 条 / 来源 {data.source_count} 个",
           size=9, italic=True)
 
     # 概览
-    _heading(doc, "一、本周概览", 1)
+    _heading(doc, "一、本月判断" if monthly else "一、本周概览", 1)
+    if monthly and data.coverage_note:
+        _para(doc, data.coverage_note, size=9)
     _para(doc, data.overview or "（无）")
     for pt in data.overview_points:
         _bullet(doc, "", pt)
@@ -95,7 +102,7 @@ def to_docx(data: ReportData, path: Path) -> None:
             _bullet(doc, title, f"—— {it.get('note', '')}")
 
     # TOP5
-    _heading(doc, "四、本周 TOP 事件", 1)
+    _heading(doc, f"四、本{unit} TOP 事件", 1)
     if data.top5:
         for rank, idx in enumerate(data.top5, 1):
             _para(doc, f"{rank}. {_item_title(data, idx)}")
@@ -112,33 +119,45 @@ def to_docx(data: ReportData, path: Path) -> None:
             _bullet(doc, it["title"],
                     f"{'（' + companies + '）' if companies else ''}")
     else:
-        _para(doc, "（本周没有明显的厂商/集成商动态条目）")
+        _para(doc, f"（本{unit}没有明显的厂商/集成商动态条目）")
 
     # 趋势与下周关注
     _heading(doc, "六、趋势观察", 1)
-    _heading(doc, "6.1 宏观市场动态", 2)
+    _heading(doc, "6.1 政策与市场" if monthly else "6.1 宏观市场动态", 2)
     for t in data.trends_macro:
         _bullet(doc, "", t)
     if not data.trends_macro:
         _para(doc, "（无）")
-    _heading(doc, "6.2 重点工程与项目", 2)
-    for t in data.trends_projects:
-        _bullet(doc, "", t)
-    if not data.trends_projects:
-        _para(doc, "（无）")
+    if monthly:
+        _heading(doc, "6.2 重点项目进展", 2)
+        by_idx = {it["idx"]: it for it in data.items}
+        for project in data.projects:
+            _heading(doc, project["name"], 2)
+            for idx in project["indices"]:
+                item = by_idx[idx]
+                _bullet(doc, f"{item['published_at']} ｜ ", f"{item['title']} [{idx}]")
+        if not data.projects:
+            _para(doc, "（无）")
+    else:
+        _heading(doc, "6.2 重点工程与项目", 2)
+        for t in data.trends_projects:
+            _bullet(doc, "", t)
+        if not data.trends_projects:
+            _para(doc, "（无）")
     _heading(doc, "6.3 集成商产品规划建议", 2)
     for t in data.trends_vendor:
         _bullet(doc, "", t)
     if not data.trends_vendor:
         _para(doc, "（无）")
-    _heading(doc, "七、下周关注", 1)
-    for n in data.next_week:
+    _heading(doc, f"七、下{unit}关注", 1)
+    follow_up = data.next_month if monthly else data.next_week
+    for n in follow_up:
         _bullet(doc, "", n)
-    if not data.next_week:
+    if not follow_up:
         _para(doc, "（无）")
 
     # 附录清单（列：# / 标题 / 来源 / 日期 / 重要度）
-    _heading(doc, f"附录：本周新闻清单（{len(data.items)} 条）", 1)
+    _heading(doc, f"附录：本{unit}新闻清单（{len(data.items)} 条）", 1)
     table = doc.add_table(rows=1, cols=5)
     table.style = "Table Grid"
     table.autofit = False
@@ -166,7 +185,7 @@ def to_docx(data: ReportData, path: Path) -> None:
     doc.save(str(path))
 
 
-def _item_title(data: ReportData, idx: int) -> str:
+def _item_title(data: ReportData | MonthlyReportData, idx: int) -> str:
     for it in data.items:
         if it["idx"] == idx:
             return it["title"]

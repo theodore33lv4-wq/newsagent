@@ -1,58 +1,88 @@
-"""newsagent.report —— 周报综述（生成 / HTML 渲染 / Word 导出）。
-
-write_report()：本周行数据 → 综述 → 落盘 reports/{week}/weekly-{week}.{html,docx,json}。
-"""
+"""周报与月报的综述生成、渲染和导出。"""
 
 from __future__ import annotations
 
 import json
 import os
 from collections.abc import Callable
+from dataclasses import asdict
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from loguru import logger
 
-from ..classify.llm import LLMProvider
+from ..archive.store import Store
+from ..classify.llm import LLMProvider, MockLLMProvider
 from ..utils.config import Config
-from ..utils.dates import now_local
+from ..utils.dates import month_range, now_local
 from .export import to_docx
-from .generator import ReportData, generate
+from .generator import MonthlyReportData, ReportData, generate
+from .monthly import generate_monthly
 from .render import render_html
 
 
 def write_report(cfg: Config, provider: LLMProvider | None, week: str,
                  rows: list[dict], *, load_text: Callable[[dict], str | None] | None = None) -> dict:
     """写入 JSON 和已配置的周报格式，返回产物路径与报告数据。"""
+    formats = _report_formats(cfg)
+    generated_at = now_local(cfg.app.get("timezone")).strftime("%Y-%m-%d %H:%M")
+    data = generate(cfg, provider, week, rows, generated_at, load_text=load_text)
+    paths = _write_files(cfg, data, cfg.data_dir / "reports" / week, formats)
+    logger.info("周报已生成：{}", week)
+    return {"week": week, **paths}
+
+
+def write_monthly_report(cfg: Config, provider: LLMProvider, month: str) -> dict:
+    formats = _report_formats(cfg)
+    start, end = month_range(month)
+    tz_name = cfg.app.get("timezone")
+    with Store(cfg.data_dir, read_only=True) as store:
+        rows, pending, undated = store.get_month(start, end, tz_name)
+        data = generate_monthly(
+            cfg, provider, month, rows, now_local(tz_name).strftime("%Y-%m-%d %H:%M"),
+            pending=pending, undated=undated, preview=isinstance(provider, MockLLMProvider),
+            load_text=store.article_text,
+        )
+    paths = _write_files(cfg, data, cfg.data_dir / "reports" / month, formats)
+    logger.info("月报已生成：{}", month)
+    return {"month": month, **paths}
+
+
+def _report_formats(cfg: Config) -> list[str]:
     formats = cfg.report.get("formats", ["html", "docx"])
     if not isinstance(formats, list) or any(fmt not in ("html", "docx") for fmt in formats):
         raise ValueError("report.formats 必须为 HTML、DOCX 格式列表")
-    generated_at = now_local(cfg.app.get("timezone")).strftime("%Y-%m-%d %H:%M")
-    data = generate(cfg, provider, week, rows, generated_at, load_text=load_text)
+    return formats
 
-    out_dir = cfg.data_dir / "reports" / week
+
+def _write_files(cfg: Config, data: ReportData | MonthlyReportData, out_dir: Path,
+                 formats: list[str]) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     with TemporaryDirectory(prefix=".report-", dir=out_dir) as work_dir:
         files = _stage_report(cfg, data, out_dir, Path(work_dir), formats)
-        paths = {"week": week, "data": data}
+        paths = {"data": data}
         for key, path in files.items():
             target = out_dir / path.name
             path.replace(target)
             paths[key] = target
-    logger.info("周报已生成：{}", week)
     return paths
 
 
-def _stage_report(cfg: Config, data: ReportData, out_dir: Path, staging: Path,
+def _stage_report(cfg: Config, data: ReportData | MonthlyReportData, out_dir: Path, staging: Path,
                   formats: list[str]) -> dict[str, Path]:
-    basename = f"weekly-{data.week}"
+    if isinstance(data, MonthlyReportData):
+        basename = f"monthly-{data.month}" + ("-preview" if data.preview else "")
+        payload = asdict(data)
+    else:
+        basename = f"weekly-{data.week}"
+        payload = _data_to_dict(data)
     json_path = staging / f"{basename}.json"
-    json_path.write_text(json.dumps(_data_to_dict(data), ensure_ascii=False, indent=1),
+    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=1),
                          encoding="utf-8")
     paths = {"json_path": json_path}
 
-    # 附录条目附带"存档"相对链接：从 reports/<week>/ 指向 raw/ 快照，
+    # 附录条目附带从报告目录指向 raw/ 快照的相对链接，
     # 保证整个 data/ 目录一起移动/部署后链接依然有效
     if "html" in formats:
         render_items = []
@@ -91,4 +121,4 @@ def _data_to_dict(data: ReportData) -> dict:
     }
 
 
-__all__ = ["write_report", "ReportData", "generate"]
+__all__ = ["write_report", "write_monthly_report", "ReportData", "generate"]

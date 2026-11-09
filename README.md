@@ -151,6 +151,7 @@ git pull
 | `run_weekly.py --regen --week 2026-W36` | 跳过采集，重新生成指定周周报 |
 | `run_weekly.py --provider mock` | 临时切换为 Mock 模型 |
 | `python -m newsagent report --week 2026-W36` | 以子命令形式重新生成指定周周报 |
+| `run_monthly.py --month 2026-10` | 读取已打标归档，使用配置中的模型生成指定自然月的月报 |
 | `check_env.py` | 环境自检 |
 | `install_task.ps1 [-Time "09:00"] [-Uninstall]` | 注册 / 调整 / 移除定时任务 |
 | `run_weekly.py --week 2026-W38 --no-collect` | 只处理指定周的待分类、待核验日期条目，并生成周报 |
@@ -159,6 +160,18 @@ git pull
 | `recover_filtered.py --week 2026-W38` | 查看被过滤的条目及其 GUID 和原因 |
 | `recover_filtered.py --week 2026-W38 --guid <GUID> --apply` | 恢复指定条目，可重复指定 `--guid` |
 | `python -m pytest -q` | 运行单元与集成测试 |
+
+**手动生成月报**
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_monthly.py --month 2026-10
+```
+
+月报按配置时区内的发布日期取数，只读已有归档。先确认覆盖月末的周任务已处理完。月报会提示已知待处理、日期未确认的记录以及采集覆盖情况。`--data-dir` 可指定另一份已有归档。
+
+默认使用项目配置中的模型，可能调用 API 并产生费用。正式月报保存到 `data/reports/2026-10/monthly-2026-10.*`。加 `--provider mock` 可离线生成预览，产物名带 `-preview` 后缀。输出格式沿用 `report.formats`，JSON 始终保留。月报目前由手动命令生成。
+
+`report.monthly_max_items` 默认给综述模型最多 60 条证据，按一级主题轮流选取。统计和附录使用当月全部去重后的相关新闻。重点项目按报道日期展示节点，HTML 正文中的引用编号可打开新闻原网页。
 
 **数据补救与备份**。先查看清单并选中误过滤条目。有正文的条目恢复后可用 `--no-collect` 重跑，空正文条目会在正常采集时重新下载。SQLite 保存分类结果和后续日期修正，完整备份应同时包含 `data/index.sqlite3`、`data/articles/` 和 `data/raw/`。单独导入原始存档无法还原索引中的分类和后续修正。
 

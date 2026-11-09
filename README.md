@@ -179,7 +179,7 @@ git pull
 
 **`config.yaml`**。`llm.tagger_model` 与 `llm.report_model` 分别指定打标和综述模型，留空时使用 `llm.model`。`archive.strict_week` 默认开启，日期无法确认的相关新闻留待核验。关闭后，未确认日期的条目可保留在原存档周。已知日期始终按实际发布日期归周。`report.formats` 选择 HTML 或 Word，JSON 始终保留。`report.max_items` 只限制模型输入，统计和附录保留全部去重后的相关新闻。
 
-打标默认只处理目标周，并记录每批进度和耗时。其他周条目继续排队，可按周补跑，也可启用 `classify.process_backlog` 在正常采集时处理积压。页面链接密度较高时，`archive.min_prose_chars` 指定可交给模型复核的独立正文长度。周报会检查综述中的引用编号、数值、统计年份和部分项目阶段，证据不足的表述用存档摘要替换或移除。
+打标默认只处理目标周，并记录每批进度和耗时。其他周条目继续排队，可按周补跑，也可启用 `classify.process_backlog` 在正常采集时处理积压。页面链接密度较高时，`archive.min_prose_chars` 指定可交给模型复核的独立正文长度。周报和月报会检查综述中的引用编号、数值、统计年份和部分项目阶段。证据不足的表述保留原文和引用，在前面加 `⚠`，读者可结合原文判断。
 
 **`sources.yaml`**。支持 `sohu_account`、`website` 和 `rss`。网站默认识别带 `rel=next` 或标注“下一页”的链接，可用 `next_page_selector` 指定站点的下一页选择器，并用 `max_pages` 和 `limit` 限制采集量。摘要会提示分页上限、订阅保留范围或整周覆盖未经验证。
 

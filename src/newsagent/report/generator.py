@@ -21,7 +21,7 @@ from ..utils.jsonrepair import parse_json_lenient
 from ..utils.config import Config
 from ..utils.dates import stored_date, week_label_cn
 from ..utils.tags import is_vendor_tag
-from .evidence import check_composition
+from .evidence import EVIDENCE_MARKER, check_composition
 
 
 @dataclass(kw_only=True)
@@ -40,12 +40,13 @@ class ReportContent:
     trends_vendor: list[str] = field(default_factory=list)    # 趋势·集成商产品规划建议
     items: list[dict] = field(default_factory=list)    # 附录清单
     fallback: bool = False                              # 是否走降级生成
-    evidence_adjustments: int = 0                        # 证据不足而替换或移除的表述数
+    evidence_adjustments: int = 0                        # 标记为证据不足的表述数
 
     @property
     def review_note(self) -> str:
         if self.evidence_adjustments:
-            return f"综述有 {self.evidence_adjustments} 处表述因证据不足已替换或移除。"
+            return (f"{EVIDENCE_MARKER} 表示证据不足，请结合原文判断。"
+                    f"本报告共标记 {self.evidence_adjustments} 处。")
         if self.fallback:
             return "模型输出缺失或不完整，部分内容由统计或存档摘要补齐。"
         return ""
@@ -236,7 +237,7 @@ def generate(cfg: Config, provider: LLMProvider | None, week: str,
     )
     data.evidence_adjustments = check_composition(composed, selected)
     if data.evidence_adjustments:
-        logger.warning("综述证据校验：替换或移除 {} 处证据不足的表述", data.evidence_adjustments)
+        logger.warning("综述证据校验：标记 {} 处证据不足的表述", data.evidence_adjustments)
 
     notes = composed.get("notes") or {}
     for t in data.themes:

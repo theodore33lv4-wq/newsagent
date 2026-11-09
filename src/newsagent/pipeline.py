@@ -81,7 +81,7 @@ def run_pipeline(cfg: Config, *, week: str | None = None, limit: int | None = No
             data = stats.report_paths["data"]
             stats.duplicates = len(rows) - data.total_count
             if data.evidence_adjustments:
-                stats.add_error(f"综述已降级：有 {data.evidence_adjustments} 处表述因证据不足被替换或移除")
+                stats.add_error(f"综述需复核：已标记 {data.evidence_adjustments} 处证据不足的表述")
             elif data.fallback:
                 stats.add_error("综述已降级，部分内容使用存档摘要或统计补齐")
         except Exception as exc:

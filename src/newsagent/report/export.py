@@ -134,8 +134,10 @@ def to_docx(data: ReportData | MonthlyReportData, path: Path) -> None:
         for project in data.projects:
             _heading(doc, project["name"], 2)
             for idx in project["indices"]:
-                item = by_idx[idx]
-                _bullet(doc, f"{item['published_at']} ｜ ", f"{item['title']} [{idx}]")
+                if item := by_idx.get(idx):
+                    _bullet(doc, f"{item['published_at']} ｜ ", f"{item['title']} [{idx}]")
+                else:
+                    _bullet(doc, "", f"[{idx}] 未找到对应新闻")
         if not data.projects:
             _para(doc, "（无）")
     else:

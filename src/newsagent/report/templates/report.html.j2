@@ -170,7 +170,11 @@
     <h3>{{ project.name }}</h3>
     <ul class="trends">
       {% for idx in project.indices %}
+      {% if idx in by_idx %}
       <li>{{ by_idx[idx].published_at }} ｜ {{ by_idx[idx].title }} {{ cited_text('[' ~ idx ~ ']') }}</li>
+      {% else %}
+      <li>[{{ idx }}] 未找到对应新闻</li>
+      {% endif %}
       {% endfor %}
     </ul>
     {% else %}<p>（无）</p>{% endfor %}

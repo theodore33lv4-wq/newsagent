@@ -3,6 +3,7 @@
 import zipfile
 
 from bs4 import BeautifulSoup
+from docx import Document
 
 from newsagent.classify.llm import MockLLMProvider
 from newsagent.report import write_report
@@ -281,20 +282,30 @@ def test_report_checks_model_stage_and_original_year(cfg):
     reply = {
         "notes": [{"idx": 1, "note": "上海正式发布行动方案。"},
                   {"idx": 2, "note": "研究报告显示，2025年投资增长超200%。"}],
-        "overview": "上海正式发布行动方案 [1]。投资增长超200% [2]。",
+        "overview": "上海正式发布行动方案。[1] 研究显示2025年投资增长超200% [2]。投资增长超200% [2]。",
         "overview_points": ["上海已发布方案 [1]"],
         "top5": [1, 2],
         "trends": {"macro": ["研究显示2025年投资增长超200% [2]"],
                    "projects": ["投资增长超300% [2]"], "vendor_advice": []},
         "next_week": ["后续关注 [999]"],
     }
-    data = generate(cfg, MockLLMProvider(lambda _: json.dumps(reply)), "2026-W35", rows, "now")
+    out = write_report(cfg, MockLLMProvider(lambda _: json.dumps(reply)), "2026-W35", rows)
+    data = out["data"]
     assert data.fallback and data.evidence_adjustments == 6
-    assert "6 处表述因证据不足" in render_html(data)
-    assert "发布" not in data.overview and "上海编制了行动方案" in data.overview
-    assert "2025年投资增长超200%" in data.overview
+    assert data.overview == (
+        "⚠ 上海正式发布行动方案。[1] 研究显示2025年投资增长超200% [2]。⚠ 投资增长超200% [2]。"
+    )
+    assert data.overview_points == ["⚠ 上海已发布方案 [1]"]
     assert data.trends_macro == ["研究显示2025年投资增长超200% [2]"]
-    assert "300%" not in data.trends_projects[0]
-    assert not data.next_week
+    assert data.trends_projects == ["⚠ 投资增长超300% [2]"]
+    assert data.next_week == ["⚠ 后续关注 [999]"]
     notes = {note["idx"]: note["note"] for theme in data.themes for note in theme["items"]}
-    assert notes[1] == "上海编制了行动方案。"
+    assert notes[1] == "⚠ 上海正式发布行动方案。"
+
+    html = BeautifulSoup(out["html_path"].read_text(encoding="utf-8"), "html.parser")
+    assert "⚠ 表示证据不足" in html.select_one(".overview .footnote").get_text()
+    assert html.select_one(".overview p a")["href"] == rows[0]["url"]
+    assert html.select_one(".next li").get_text() == data.next_week[0]
+    assert html.select_one(".next a") is None
+    assert data.overview in [p.text for p in Document(out["docx_path"]).paragraphs]
+    assert json.loads(out["json_path"].read_text(encoding="utf-8"))["overview"] == data.overview

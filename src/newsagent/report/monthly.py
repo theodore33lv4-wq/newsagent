@@ -11,7 +11,7 @@ from ..classify.llm import LLMProvider
 from ..utils.config import Config
 from ..utils.dates import month_range, now_local
 from ..utils.jsonrepair import parse_json_lenient
-from .evidence import check_composition
+from .evidence import check_composition, mark_unsupported
 from .generator import (
     MonthlyReportData, _compact, _dedupe_rows, _distribution, _group_by_level1,
     _is_text_list, _level1_names, _str, _valid_indices, build_items,
@@ -32,7 +32,7 @@ _SYSTEM = """你是智能交通月报综述助手。根据给定月份的新闻�
 每条判断、观察、建议和关注都要带支持它的 [编号]。多个引用写成 [1][2]。
 仅使用给出的编号和材料，缺少证据的列表留空。保持原文的项目阶段、统计年份和数值范围。"""
 
-_TEXT_LISTS = ("overview_points", "trends_macro", "trends_vendor", "next_month")
+_TEXT_LIMITS = {"overview_points": 5, "trends_macro": 5, "trends_vendor": 3, "next_month": 5}
 
 
 def generate_monthly(cfg: Config, provider: LLMProvider, month: str, rows: list[dict],
@@ -78,14 +78,14 @@ def generate_monthly(cfg: Config, provider: LLMProvider, month: str, rows: list[
     composed = _compose(cfg, provider, month, selected, nodes)
     data.evidence_adjustments = check_composition(composed, selected, require_refs=True)
     if composed:
-        data.projects, rejected = _projects(composed["projects"], selected)
-        data.evidence_adjustments += rejected
+        data.projects, marked = _projects(composed["projects"], items, selected)
+        data.evidence_adjustments += marked
         data.top5 = _valid_indices(composed["top5"], selected)
     data.overview = composed.get("overview", "").strip() or f"本月归档收录 {len(items)} 条智能交通相关新闻。"
-    data.overview_points = composed.get("overview_points", [])[:5]
-    data.trends_macro = composed.get("trends_macro", [])[:5]
-    data.trends_vendor = composed.get("trends_vendor", [])[:3]
-    data.next_month = composed.get("next_month", [])[:5]
+    data.overview_points = composed.get("overview_points", [])
+    data.trends_macro = composed.get("trends_macro", [])
+    data.trends_vendor = composed.get("trends_vendor", [])
+    data.next_month = composed.get("next_month", [])
     data.fallback = not composed or data.evidence_adjustments > 0
     return data
 
@@ -107,36 +107,41 @@ def _compose(cfg: Config, provider: LLMProvider, month: str, items: list[dict], 
             return {}
         reply = parse_json_lenient(raw)
         if (isinstance(reply, dict) and _str(reply.get("overview"))
-                and all(_is_text_list(reply.get(key)) for key in _TEXT_LISTS)
+                and all(_is_text_list(reply.get(key)) for key in _TEXT_LIMITS)
                 and isinstance(reply.get("projects"), list)
                 and isinstance(reply.get("top5"), list)
                 and all(type(idx) is int and idx in by_idx for idx in reply["top5"])):
             return {"overview": _str(reply["overview"]), "top5": reply["top5"],
-                    "projects": reply["projects"], **{key: reply[key] for key in _TEXT_LISTS}}
+                    "projects": reply["projects"],
+                    **{key: reply[key][:limit] for key, limit in _TEXT_LIMITS.items()}}
         logger.warning("月报综述输出格式不完整（第 {} 次）", attempt + 1)
         messages.append({"role": "user", "content": "请按要求重新输出完整的 JSON 对象。"})
     return {}
 
 
-def _projects(groups: list, items: list[dict]) -> tuple[list[dict], int]:
+def _projects(groups: list, items: list[dict], selected: list[dict]) -> tuple[list[dict], int]:
     by_idx = {it["idx"]: it for it in items}
+    selected_indices = {it["idx"] for it in selected}
     projects = []
     seen = set()
-    rejected = 0
+    marked = 0
     for group in groups[:5]:
         name = _str(group.get("name")) if isinstance(group, dict) else ""
-        indices = group.get("indices") if name else None
         key = _compact(name)
-        if (len(key) < 4 or key in seen or not isinstance(indices, list) or not indices
-                or any(type(idx) is not int or idx not in by_idx for idx in indices)):
-            rejected += 1
-            continue
-        # 复用原始标题展示节点，且每篇材料都须出现同一项目名。
-        if not all(any(key in _compact(by_idx[idx][field]) for field in ("title", "summary"))
-                   for idx in indices):
-            rejected += 1
+        if not key or key in seen:
             continue
         seen.add(key)
-        ordered = sorted(set(indices), key=lambda idx: (by_idx[idx]["published_at"], idx))
+        refs = group.get("indices")
+        refs = refs if isinstance(refs, list) else []
+        indices = [idx for idx in refs if type(idx) is int]
+        # 保留待核实的归并，节点标题仍来自归档。无对应原文的编号也保留供读者识别。
+        if (len(key) < 4 or not indices or len(indices) != len(refs)
+                or any(idx not in selected_indices or not any(
+                    key in _compact(by_idx[idx][field]) for field in ("title", "summary")
+                ) for idx in indices)):
+            name = mark_unsupported(name)
+            marked += 1
+        ordered = sorted(set(indices), key=lambda idx: (idx not in by_idx,
+                                                        by_idx.get(idx, {}).get("published_at", ""), idx))
         projects.append({"name": name, "indices": ordered})
-    return projects, rejected
+    return projects, marked

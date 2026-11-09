@@ -83,29 +83,39 @@ def test_monthly_projects_and_citations_use_selected_evidence_but_appendix_is_co
         policy = items["东城发布交通政策"]
         assert len(items) == 3
         return json.dumps({
-            "overview": f"新城智慧高速项目公布中标结果 [{award}]。",
+            "overview": f"新城智慧高速项目已开工 [{award}]。",
             "overview_points": [f"新城智慧高速项目已开工 [{award}]", "没有出处的观察"],
             "trends_macro": [f"东城发布交通政策 [{policy}]"],
             "trends_vendor": [], "top5": [award, policy],
             "projects": [{"name": "新城智慧高速项目", "indices": [award, tender]},
-                         {"name": "其他地区项目", "indices": [award, policy]}],
+                         {"name": "其他地区项目", "indices": [award, policy]},
+                         {"name": "没有对应新闻的项目", "indices": [999]}],
             "next_month": [f"关注新城智慧高速项目后续进展 [{award}]", "缺少引用的建议"],
         }, ensure_ascii=False)
 
     out = write_monthly_report(cfg, MockLLMProvider(respond), "2026-10")
     data = out["data"]
-    assert data.evidence_adjustments == 4 and data.fallback
+    assert data.evidence_adjustments == 6 and data.fallback
     assert len(data.items) == sum(d["count"] for d in data.distribution) == 4
-    assert data.overview_points == [] and len(data.next_month) == len(data.projects) == 1
+    assert data.overview.startswith("⚠ 新城智慧高速项目已开工 ")
+    assert data.overview_points == [data.overview.removesuffix("。"), "⚠ 没有出处的观察"]
+    assert data.next_month[1] == "⚠ 缺少引用的建议"
+    assert [project["name"] for project in data.projects] == [
+        "新城智慧高速项目", "⚠ 其他地区项目", "⚠ 没有对应新闻的项目",
+    ]
     assert [data.find_item(idx)["published_at"] for idx in data.projects[0]["indices"]] == [
         "2026-10-05", "2026-10-25",
     ]
     html = BeautifulSoup(out["html_path"].read_text(encoding="utf-8"), "html.parser")
     assert len(html.select("table.appendix tbody tr")) == 4
-    assert [a["href"] for a in html.select(".projects .citation")] == [
+    assert [a["href"] for a in html.select(".projects ul")[0].select(".citation")] == [
         "https://example.com/tender", "https://example.com/award",
     ]
+    missing = html.select(".projects ul")[-1]
+    assert "[999] 未找到对应新闻" in missing.get_text() and not missing.select("a")
     assert html.select_one(".next .citation")["href"] == "https://example.com/award"
+    assert "⚠ 没有对应新闻的项目" in [p.text for p in Document(out["docx_path"]).paragraphs]
+    assert json.loads(out["json_path"].read_text(encoding="utf-8"))["projects"] == data.projects
 
 
 def test_monthly_missing_archive_is_not_created(cfg, monkeypatch):

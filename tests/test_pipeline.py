@@ -5,7 +5,10 @@
 
 from datetime import datetime, timezone
 
+from bs4 import BeautifulSoup
+
 from newsagent.archive.downloader import FetchedContent
+from newsagent.archive.store import Store
 from newsagent.collect.base import Article, Collector
 from newsagent.pipeline import run_pipeline
 
@@ -50,7 +53,7 @@ def _patch(monkeypatch, articles=None, date_str="2026-08-25"):
     import newsagent.pipeline as pipe
     monkeypatch.setattr(
         pipe, "build_collectors",
-        lambda c: [FakeCollector(c, {"id": "fake", "name": "IT测试",
+        lambda c, errors=None: [FakeCollector(c, {"id": "fake", "name": "IT测试",
                                      "type": "website", "limit": 10}, articles)])
     monkeypatch.setattr(pipe, "download_and_extract",
                         lambda a, c: _fake_content(a, date_str))
@@ -63,11 +66,14 @@ def test_pipeline_end_to_end(cfg, monkeypatch):
     assert stats.new_articles == 3
     assert stats.archived == 3 and stats.archived_failed == 0
     assert stats.classified == 3
+    assert "打标批次进度 1/1" in (cfg.data_dir / "logs/2026-W35.log").read_text(encoding="utf-8")
     assert stats.relevant >= 1
     assert stats.report_paths.get("html_path", None) is not None
     html = stats.report_paths["html_path"].read_text(encoding="utf-8")
-    assert "2026-08-25" in html          # 附录日期列有值（全部条目均有日期）
-    assert "—" not in html.split("附录")[1][:4000] or True
+    table = BeautifulSoup(html, "lxml").find("table")
+    date_column = [th.get_text(strip=True) for th in table.select("th")].index("日期") + 1
+    dates = [cell.get_text(strip=True) for cell in table.select(f"tbody tr td:nth-child({date_column})")]
+    assert dates == ["2026-08-25"] * 3
 
     # 重复运行：全部去重，不再新增
     stats2 = run_pipeline(cfg, week="2026-W35")
@@ -94,8 +100,8 @@ def test_pipeline_filters_non_news_pages(cfg, monkeypatch):
     assert stats.archived == 1 and stats.classified == 1
 
 
-def test_pipeline_filters_out_of_week(cfg, monkeypatch):
-    """发布日期不在目标周的新闻必须被筛掉（不出现在分类与周报中）。"""
+def test_pipeline_archives_older_articles_in_their_own_week(cfg, monkeypatch):
+    """旧闻不进入目标周周报，仍在真实归属周保留。"""
     articles = [
         Article(url="https://www.sohu.com/a/21", title="上周的旧闻",
                 source_id="fake", source_name="IT测试", published_at=OUT_WEEK),
@@ -105,11 +111,14 @@ def test_pipeline_filters_out_of_week(cfg, monkeypatch):
     _patch(monkeypatch, articles=articles, date_str="2026-08-20")
     stats = run_pipeline(cfg, week="2026-W35", limit=1)
     assert stats.out_of_week == 1 and stats.archived == 0
-    # 第二轮补跑剩下的 1 条（也是旧闻）→ 同样被过滤；已过滤条目不会再次下载
+    assert stats.historical == 1 and not stats.report_paths
+    # 第二轮补跑剩下的旧闻。
     stats2 = run_pipeline(cfg, week="2026-W35")
     assert stats2.new_articles == 1 and stats2.archived == 0 and stats2.out_of_week == 1
     stats3 = run_pipeline(cfg, week="2026-W35")
     assert stats3.new_articles == 0
+    pending = Store(cfg.data_dir).query(week="2026-W34", status="archived", relevant_only=False)
+    assert len(pending) == 2 and stats.classified == stats2.classified == 0
 
 
 def test_pipeline_dry_run_no_writes(cfg, monkeypatch):
@@ -117,12 +126,10 @@ def test_pipeline_dry_run_no_writes(cfg, monkeypatch):
     stats = run_pipeline(cfg, week="2026-W35", dry_run=True)
     assert stats.candidates == 3 and stats.new_articles == 3
     assert stats.archived == 0
-    from newsagent.archive.store import Store
-    assert Store(cfg.data_dir).query(relevant_only=False) == []
+    assert not cfg.data_dir.exists()
 
 
-def test_pipeline_dedupes_same_title_in_batch(cfg, monkeypatch):
-    """同一批次内、来自不同源的同一篇新闻（标题相同、URL 不同）只处理一条。"""
+def test_pipeline_keeps_same_title_from_different_sources(cfg, monkeypatch):
     articles = [
         Article(url="https://www.mot.gov.cn/xinwen/202609/t20260910_1.html",
                 title="山西主骨架公路5年内实现数字化升级",
@@ -134,12 +141,12 @@ def test_pipeline_dedupes_same_title_in_batch(cfg, monkeypatch):
     _patch(monkeypatch, articles=articles)
     stats = run_pipeline(cfg, week="2026-W35")
     assert stats.candidates == 2
-    assert stats.new_articles == 1          # 同批去重：第二条被识别为重复
-    assert stats.archived == 1 and stats.classified == 1
+    assert stats.new_articles == 2
+    assert stats.archived == 2 and stats.classified == 2
 
 
 def test_pipeline_dedupes_same_content(cfg, monkeypatch):
-    """标题不同但正文一致（跨源全文转载）→ 按内容哈希过滤。"""
+    """跨源全文转载各自入档，报告只显示一份。"""
     articles = [
         Article(url="https://a.com/1", title="山西公路数字化升级提速",
                 source_id="fake", source_name="源A", published_at=IN_WEEK),
@@ -151,14 +158,15 @@ def test_pipeline_dedupes_same_content(cfg, monkeypatch):
     import newsagent.pipeline as pipe
     monkeypatch.setattr(
         pipe, "build_collectors",
-        lambda c: [FakeCollector(c, {"id": "fake", "name": "IT测试",
+        lambda c, errors=None: [FakeCollector(c, {"id": "fake", "name": "IT测试",
                                      "type": "website", "limit": 10}, articles)])
     monkeypatch.setattr(pipe, "download_and_extract",
                         lambda a, c: _fake_content(a, body=same_body))
     stats = run_pipeline(cfg, week="2026-W35")
-    assert stats.archived == 1
+    assert stats.archived == 2
     assert stats.duplicates == 1
-    assert stats.classified == 1
+    assert stats.classified == 2
+    assert len(stats.report_paths["data"].items) == 1
 
 
 def test_pipeline_limit_keeps_remaining(cfg, monkeypatch):
@@ -185,12 +193,12 @@ def test_pipeline_defers_next_week_articles(cfg, monkeypatch):
     assert stats.out_of_week == 1 and stats.deferred == 1
     assert stats.archived == 0
 
-    from newsagent.archive.store import Store
     st = Store(cfg.data_dir)
     rows = st.query(week="2026-W36", relevant_only=False)
-    # 归属周已修正为 W36；同一轮分类阶段顺带完成打标，留待 W36 周报使用
+    # 归属 W36，只在处理 W36 时打标。
     assert len(rows) == 1 and rows[0]["week"] == "2026-W36"
-    assert rows[0]["status"] == "classified" and rows[0]["relevance"] == 1
+    assert rows[0]["status"] == "archived" and rows[0]["relevance"] is None
+    assert stats.classified == 0
 
     # 跑 W36 时该条正常进入 W36 周报
     stats2 = run_pipeline(cfg, week="2026-W36")
@@ -218,3 +226,77 @@ def test_pipeline_regen_no_data(cfg):
     stats = run_pipeline(cfg, week="2026-W35", regen=True)
     assert stats.errors
     assert stats.report_paths == {}
+
+
+def test_cli_returns_error_when_classification_fails(cfg, monkeypatch):
+    from newsagent import cli, pipeline
+    from newsagent.utils.config import Config
+
+    class OfflineModel:
+        def chat(self, *args, **kwargs):
+            raise RuntimeError("simulated outage")
+
+    _patch(monkeypatch, articles=FAKE_ARTICLES[:1])
+    monkeypatch.setattr(Config, "load", lambda: cfg)
+    monkeypatch.setattr(pipeline, "create_provider", lambda _: OfflineModel())
+    assert cli.main(["--week", "2026-W35"]) == 1
+    assert not (cfg.data_dir / "reports").exists()
+    assert Store(cfg.data_dir).query(status="archived", relevant_only=False)
+
+
+def test_pipeline_routes_model_date_back_to_historical_week(cfg, monkeypatch):
+    from newsagent import pipeline
+    from newsagent.classify.llm import MockLLMProvider
+
+    article = Article("https://a.com/undated", "待确认日期的新闻", "fake", "测试源")
+    store = Store(cfg.data_dir)
+    store.save_article("2026-W35", article, FetchedContent("<html/>", LONG_BODY, "bs4", None, None))
+
+    class DatedModel(MockLLMProvider):
+        def chat(self, *args, **kwargs):
+            return super().chat(*args, **kwargs).replace('"published_date": null', '"published_date": "2026-08-25"')
+
+    _patch(monkeypatch, articles=[])
+    skipped = pipeline.run_pipeline(cfg, week="2026-W36", collect=False, provider=DatedModel())
+    assert skipped.classified == 0
+    cfg.classify["process_backlog"] = True
+    stats = pipeline.run_pipeline(cfg, week="2026-W36", provider=DatedModel())
+    assert stats.classified == 1 and stats.historical == 1 and not stats.errors
+    assert store.get_week("2026-W35")[0]["published_at"] == "2026-08-25"
+
+
+def test_pipeline_retries_missing_body_after_article_leaves_source(cfg, monkeypatch):
+    from newsagent import pipeline
+
+    article = FAKE_ARTICLES[0]
+    _patch(monkeypatch, articles=[article])
+    monkeypatch.setattr(pipeline, "download_and_extract",
+                        lambda a, c: FetchedContent("<html/>", None, "failed", None, None))
+    failed = run_pipeline(cfg, week="2026-W35")
+    assert failed.errors and failed.archived_failed == 1
+    [row] = Store(cfg.data_dir).query(status="retryable", relevant_only=False)
+    assert (cfg.data_dir / row["html_file"]).exists()
+
+    _patch(monkeypatch, articles=[])
+    retry = run_pipeline(cfg, week="2026-W35")
+    assert retry.classified == 1 and not retry.errors and retry.report_paths
+
+
+def test_cli_reports_partial_run_and_applies_root_log_level(cfg, monkeypatch, capsys):
+    from newsagent import cli, pipeline
+    from newsagent.utils.config import Config
+
+    _patch(monkeypatch)
+    assert run_pipeline(cfg, week="2026-W35").report_paths
+
+    class FailedCollector(FakeCollector):
+        def collect(self):
+            raise OSError("模拟来源失败")
+
+    monkeypatch.setattr(pipeline, "build_collectors", lambda c, errors=None: [FailedCollector(c, {})])
+    monkeypatch.setattr(Config, "load", lambda: cfg)
+    setup_calls = []
+    monkeypatch.setattr(pipeline, "setup_logging", lambda *args, **kwargs: setup_calls.append(kwargs))
+    assert cli.main(["--log-level", "warning", "pipeline", "--week", "2026-W35"]) == 1
+    assert setup_calls == [{"level": "WARNING", "write_file": True}]
+    assert "部分完成" in capsys.readouterr().out

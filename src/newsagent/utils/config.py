@@ -140,10 +140,8 @@ class Config:
             name = str(node.get("name", "")).strip()
             children = node.get("children") or []
             if name:
-                if children:
-                    paths.extend(f"{name}/{str(c).strip()}" for c in children)
-                else:
-                    paths.append(name)
+                paths.append(name)
+                paths.extend(f"{name}/{str(c).strip()}" for c in children)
         return paths
 
     def sources_enabled(self) -> list[dict]:

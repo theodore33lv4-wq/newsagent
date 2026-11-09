@@ -16,18 +16,14 @@ class RSSCollector(Collector):
     def collect(self) -> list[Article]:
         url = str(self.source.get("url", "")).strip()
         if not url:
-            logger.error("[{}] 缺少 url 配置", self.source_id)
-            return []
-        try:
-            resp = fetch(url, self.cfg)
-        except Exception as exc:
-            logger.error("[{}] RSS 拉取失败 {}: {}", self.source_id, url, exc)
-            return []
-
+            raise ValueError("缺少 RSS URL")
+        resp = fetch(url, self.cfg)
         feed = feedparser.parse(resp.content)
-        if feed.bozo and not feed.entries:
-            logger.warning("[{}] RSS 解析异常: {}", self.source_id,
-                           getattr(feed, "bozo_exception", "unknown"))
+        if not feed.entries and (feed.bozo or not feed.version):
+            raise ValueError(f"RSS 解析异常: {getattr(feed, 'bozo_exception', '无法识别订阅格式')}")
+        self.coverage_warning = "覆盖范围以订阅源当前保留的条目为限"
+        if len(feed.entries) > self.limit:
+            self.coverage_warning += f"，已达到单源上限 {self.limit}"
 
         articles: list[Article] = []
         for entry in feed.entries[: self.limit]:
@@ -36,7 +32,7 @@ class RSSCollector(Collector):
             if not link or not title:
                 continue
             published = None
-            t = entry.get("published_parsed") or entry.get("updated_parsed")
+            t = entry.get("published_parsed")
             if t:
                 try:
                     published = datetime(*t[:6], tzinfo=timezone.utc)

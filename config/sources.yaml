@@ -38,8 +38,8 @@ sources:
     enabled: true
     base_url: https://www.mot.gov.cn
     list_url: https://www.mot.gov.cn/xinwen/jiaotongyaowen/index.html
-    article_selector: "a[href*='t2026']"   # 实测：文章链接形如 .../202608/t20260826_4223213.html
-    limit: 25
+    article_selector: "a[href*='t20'][href$='.html']"   # 文章链接形如 .../202608/t20260826_4223213.html
+    limit: 100
 
   - id: miit_policy
     name: 工信部·政策与公告（首页精选）
@@ -73,7 +73,7 @@ sources:
     type: rss
     enabled: true
     url: "https://auto.gasgoo.com/Rss/ClassRss.aspx?ClassId=409"
-    limit: 20
+    limit: 100
 
   - id: gasgoo_news
     name: 盖世汽车·综合（备选，含智能驾驶话题，RSS）

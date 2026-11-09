@@ -25,7 +25,7 @@ class FetchedContent:
     meta_date: str | None
 
 
-_MAX_TEXT_CHARS = 200_000  # 防止异常页面产生超大文本
+MAX_TEXT_CHARS = 200_000  # 防止异常页面产生超大文本
 
 
 def _bs4_fallback(html: str) -> str:
@@ -34,7 +34,7 @@ def _bs4_fallback(html: str) -> str:
         for tag in soup(["script", "style", "noscript", "iframe", "nav", "header", "footer"]):
             tag.decompose()
         text = soup.get_text("\n", strip=True)
-        return text[:_MAX_TEXT_CHARS]
+        return text[:MAX_TEXT_CHARS]
     except Exception:
         return ""
 
@@ -46,11 +46,12 @@ def extract(html: str) -> tuple[str | None, str, str | None, str | None]:
         result = trafilatura.extract(
             html, output_format="json", with_metadata=True,
             include_comments=False, include_tables=False, favor_recall=True,
+            date_extraction_params={"original_date": True, "extensive_search": False},
         )
         if result:
             data = json.loads(result)
             text = (data.get("text") or "").strip() or None
-            return (text[:_MAX_TEXT_CHARS] if text else None), "trafilatura", \
+            return (text[:MAX_TEXT_CHARS] if text else None), "trafilatura", \
                 data.get("title"), data.get("date")
     except Exception as exc:
         logger.debug("trafilatura 提取异常: {}", exc)

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from jinja2 import Environment, FileSystemLoader
 
 from ..utils.tags import is_vendor_tag
 from .generator import ReportData
@@ -13,7 +14,7 @@ _TEMPLATE_DIR = Path(__file__).parent / "templates"
 
 _env = Environment(
     loader=FileSystemLoader(str(_TEMPLATE_DIR)),
-    autoescape=select_autoescape(("html",)),
+    autoescape=True,
     trim_blocks=True,
     lstrip_blocks=True,
 )
@@ -31,13 +32,28 @@ def _index(items: list[dict]) -> dict[int, dict]:
     return {it["idx"]: it for it in items}
 
 
+def _original_url(value: str | None) -> str | None:
+    if not value or any(ch.isspace() or ord(ch) < 32 for ch in value):
+        return None
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme in ("http", "https") and parsed.hostname:
+            return value
+    except ValueError:
+        pass
+    return None
+
+
 def render_html(data: ReportData, items: list[dict] | None = None) -> str:
     """渲染自包含 HTML 文本。
 
     items：附录清单渲染用的条目（可变形版本，带 html_link 相对路径）；
     缺省使用 data.items（测试/无落盘场景）。
     """
-    render_items = items if items is not None else data.items
+    render_items = [
+        {**it, "url": _original_url(it.get("url"))}
+        for it in (items if items is not None else data.items)
+    ]
     by_idx = _index(data.items)
 
     def item_title(idx) -> str:
@@ -46,7 +62,7 @@ def render_html(data: ReportData, items: list[dict] | None = None) -> str:
 
     def item_url(idx) -> str:
         it = by_idx.get(idx)
-        return (it["url"] if it and it.get("url") else "#") or "#"
+        return _original_url(it.get("url")) if it else None
 
     def item_tags(idx) -> list[str]:
         it = by_idx.get(idx)
@@ -69,7 +85,7 @@ def render_html(data: ReportData, items: list[dict] | None = None) -> str:
         trends_vendor=data.trends_vendor,
         next_week=data.next_week, items=render_items,
         relevant_count=data.relevant_count, source_count=data.source_count,
-        fallback=data.fallback,
+        review_note=data.review_note,
         item_title=item_title, item_url=item_url, item_tags=item_tags,
         vendor_items=vendor_items,
         stars=_stars,

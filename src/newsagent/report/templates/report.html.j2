@@ -1,3 +1,8 @@
+{% macro article_link(idx) -%}
+  {% set url = item_url(idx) -%}
+  {% if url %}<a href="{{ url }}" target="_blank" rel="noopener">{{ item_title(idx) }}</a>
+  {%- else %}{{ item_title(idx) }}{% endif %}
+{%- endmacro %}
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -69,7 +74,7 @@
       {% for pt in overview_points %}<li>{{ pt }}</li>{% endfor %}
     </ul>
     {% endif %}
-    {% if fallback %}<p class="footnote">（说明：本节为自动降级生成，LLM 服务暂不可用）</p>{% endif %}
+    {% if review_note %}<p class="footnote">{{ review_note }}</p>{% endif %}
   </section>
 
   {% if distribution %}
@@ -95,7 +100,7 @@
       <h3>{{ t.title }}</h3>
       <ul>
         {% for it in t['items'] %}
-        <li><a href="{{ item_url(it.idx) }}" target="_blank" rel="noopener">{{ item_title(it.idx) }}</a>
+        <li>{{ article_link(it.idx) }}
             <span class="note">{{ it.note }}</span></li>
         {% endfor %}
       </ul>
@@ -107,7 +112,7 @@
     <h2>本周 TOP{% if top5 %}{{ top5|length }}{% else %}5{% endif %}</h2>
     <ol>
       {% for idx in top5 %}
-      <li><a href="{{ item_url(idx) }}" target="_blank" rel="noopener">{{ item_title(idx) }}</a>
+      <li>{{ article_link(idx) }}
           {% if item_tags(idx) %}{% for t in item_tags(idx) %}<span class="tag">{{ t }}</span>{% endfor %}{% endif %}</li>
       {% endfor %}
     </ol>
@@ -119,7 +124,7 @@
       {% set vendor_items = vendor_items() %}
       {% if vendor_items %}
         {% for it in vendor_items %}
-        <li><a href="{{ item_url(it.idx) }}" target="_blank" rel="noopener">{{ it.title }}</a>
+        <li>{{ article_link(it.idx) }}
             <span class="imp">{{ stars(it.importance) }}</span>
             {% for c in it.companies %}<span class="tag">{{ c }}</span>{% endfor %}</li>
         {% endfor %}

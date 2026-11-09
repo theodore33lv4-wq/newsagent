@@ -16,8 +16,8 @@ import json
 import re
 from typing import Optional
 
-_FENCE_RE = re.compile(r"```(?:json)?", re.I)
-_TRAILING_COMMA_RE = re.compile(r",\s*([}\]])")
+_FENCE_RE = re.compile(r"^\x60\x60\x60(?:json)?\s*|\s*\x60\x60\x60$", re.I)
+_TRAILING_COMMA_RE = re.compile(r'"(?:[^"\\]|\\.)*"|,\s*(?=[}\]])')
 _NOTE_RE = re.compile(r'"idx"\s*:\s*(\d+)\s*,\s*"note"\s*:\s*"((?:[^"\\]|\\.)*)"')
 
 
@@ -61,13 +61,15 @@ def _try(text: str) -> Optional[dict]:
 
 def parse_json_lenient(raw: str) -> Optional[dict]:
     """尽力解析出 JSON 对象；彻底失败返回 None。"""
-    if not raw or not raw.strip():
+    if not isinstance(raw, str) or not raw.strip():
         return None
-    text = _FENCE_RE.sub("", raw).strip()
-
-    data = _try(text)
-    if data is not None:
-        return data
+    text = _FENCE_RE.sub("", raw.strip()).strip()
+    try:
+        data = json.loads(text)
+    except ValueError:
+        pass
+    else:
+        return data if isinstance(data, dict) else None
 
     start = text.find("{")
     if start == -1:
@@ -81,7 +83,7 @@ def parse_json_lenient(raw: str) -> Optional[dict]:
         if data is not None:
             return data
 
-    text = _TRAILING_COMMA_RE.sub(r"\1", text)
+    text = _TRAILING_COMMA_RE.sub(lambda m: m[0] if m[0].startswith('"') else "", text)
     data = _try(text)                      # 仅尾随逗号问题：清理后即可解析
     if data is not None:
         return data
@@ -107,6 +109,10 @@ def parse_json_lenient(raw: str) -> Optional[dict]:
 
 def _salvage_notes(text: str) -> Optional[dict]:
     """兜底：正则抽取 notes（逐条要点是周报最有价值的部分）。"""
-    notes = [{"idx": int(i), "note": n.replace('\\"', '"')}
-             for i, n in _NOTE_RE.findall(text)]
+    notes = []
+    for idx, value in _NOTE_RE.findall(text):
+        try:
+            notes.append({"idx": int(idx), "note": json.loads(f'"{value}"')})
+        except ValueError:
+            continue
     return {"notes": notes} if notes else None

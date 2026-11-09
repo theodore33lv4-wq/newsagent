@@ -25,19 +25,18 @@ def test_keys_and_content():
     t = "智慧交通周报"
     assert title_key(t) == title_key("智慧交通 周报")
     assert url_key("https://a.com/x?utm_source=1") == url_key("https://a.com/x")
-    assert content_key("车路协同试点") == content_key("车路协同试点！")
+    assert content_key("车路协同 试点") == content_key("车路协同\n试点")
+    assert content_key("同一段前言" * 200 + "一期") != content_key("同一段前言" * 200 + "二期")
 
 
 def test_dedup_checker(article):
-    # 预置历史：URL 与标题各一条（对应 store.seen_keys() 装载的真实形态）
-    chk = DedupChecker([url_key("https://www.sohu.com/a/111_222")],
-                       [title_key(article.title)])
+    chk = DedupChecker([url_key("https://www.sohu.com/a/111_222")])
     assert not chk.is_new(article)                       # URL 重复
     dup_title = Article(url="https://other.com/a/9", title=article.title,
                         source_id="s", source_name="S")
-    assert not chk.is_new(dup_title)                     # 标题重复
+    assert chk.is_new(dup_title)                         # 标题相同但 URL 不同
     fresh = Article(url="https://other.com/a/10", title="全新标题",
                     source_id="s", source_name="S")
     assert chk.is_new(fresh)
     kept = chk.dedupe([article, dup_title, fresh])
-    assert len(kept) == 1 and kept[0].title == "全新标题"
+    assert kept == [dup_title, fresh]

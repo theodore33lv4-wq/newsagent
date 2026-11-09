@@ -70,3 +70,20 @@ def test_extract_page_date_strategies():
                              "https://a.com/1") == date(2026, 9, 9)
     assert extract_page_date("<html></html>", "https://www.zgjtb.com/2026-09/08/content_1.html") \
         == date(2026, 9, 8)
+    assert extract_page_date("<article>工程于 2026-09-02 开工</article><footer>发布时间：2026-09-01</footer>",
+                             "https://a.com/1") is None
+    assert extract_page_date('<meta content="2026-08-30T17:00:00Z" property="article:published_time">') \
+        == date(2026, 8, 31)
+
+
+def test_link_heavy_page_with_independent_prose_is_reviewed(cfg):
+    cfg.archive.update(max_link_density=0.60, min_prose_chars=100)
+    body = "港口纯电拖轮已入列，配备磷酸铁锂电池和全船智能监控设备。" * 5
+    html = LISTING_HTML.replace("<body>", f"<body><div><p>{body}</p></div>")
+    assert link_density(html) > 0.60
+    result = validate_page("纯电拖轮入列", body, html, "https://a.com/1",
+                           cfg=cfg, allow_short=True)
+    assert result.ok
+    result = validate_page("纯电拖轮入列", body, LISTING_HTML, "https://a.com/1",
+                           cfg=cfg, allow_short=True)
+    assert not result.ok and result.reason == "high_link_density"

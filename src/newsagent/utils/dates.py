@@ -26,12 +26,27 @@ def now_local(tz_name: str | None = None) -> datetime:
     return datetime.now(tz=tz_for(tz_name))
 
 
+def as_local(dt: datetime, tz_name: str | None = None) -> datetime:
+    tz = tz_for(tz_name)
+    return dt.astimezone(tz) if dt.tzinfo is not None else dt.replace(tzinfo=tz)
+
+
+def stored_date(value: str | None, tz_name: str | None = None) -> date | None:
+    """读取索引和存档中的 ISO 日期，不按当前日期重新过滤历史记录。"""
+    if value:
+        try:
+            return as_local(datetime.fromisoformat(value), tz_name).date()
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
 def iso_week(dt: datetime | date | None = None, tz_name: str | None = None) -> str:
     """ISO 周编号，如 '2026-W09'。"""
     if dt is None:
         dt = now_local(tz_name)
-    if isinstance(dt, datetime) and dt.tzinfo is None:
-        dt = dt.replace(tzinfo=tz_for(tz_name))
+    if isinstance(dt, datetime):
+        dt = as_local(dt, tz_name)
     iso = dt.isocalendar()
     return f"{iso.year}-W{iso.week:02d}"
 
@@ -44,6 +59,8 @@ def target_week(dt: datetime | date | None = None, tz_name: str | None = None) -
     """
     if dt is None:
         dt = now_local(tz_name)
+    elif isinstance(dt, datetime):
+        dt = as_local(dt, tz_name)
     return iso_week(dt - timedelta(days=7), tz_name)
 
 
@@ -66,4 +83,5 @@ def week_label_cn(week: str, tz_name: str | None = None) -> str:
     tz = tz_for(tz_name)
     start, end = week_range(week, tz_name)
     fmt = "%m月%d日"
-    return f"{start.year}年第{start.isocalendar().week}周（{start.strftime(fmt)}—{end.strftime(fmt)}）"
+    iso = start.isocalendar()
+    return f"{iso.year}年第{iso.week}周（{start.strftime(fmt)}—{end.strftime(fmt)}）"

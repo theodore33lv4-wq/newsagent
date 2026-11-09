@@ -18,7 +18,7 @@ def test_taxonomy_paths(cfg):
     assert "交管技术与业务/信号控制优化" in paths
     assert "云脑与智能体/交通大模型" in paths
     assert "边缘与终端/感知与识别设备" in paths
-    assert "市场与项目" not in paths      # 有子级的一级不算合法标签
+    assert "市场与项目" in paths          # 提示词允许一级和二级标签
 
 
 def test_sources_enabled_filter(cfg):

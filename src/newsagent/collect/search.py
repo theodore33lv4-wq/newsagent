@@ -42,7 +42,7 @@ class SearchCollector(Collector):
             try:
                 articles.extend(self._search_one(kw, self.per_keyword))
             except Exception as exc:
-                logger.warning("[search] 关键词“{}”失败: {}", kw, exc)
+                self.errors.append(f"关键词“{kw}”失败: {exc}")
         # 站内去重
         seen: set[str] = set()
         out = []

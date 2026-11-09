@@ -15,16 +15,13 @@ _FORMAT = (
 )
 
 
-def setup_logging(data_dir: Path, run_tag: str, level: str = "INFO") -> Path:
+def setup_logging(data_dir: Path, run_tag: str, level: str = "INFO",
+                  *, write_file: bool = True) -> Path | None:
     """初始化日志；返回本次运行的日志文件路径。
 
     每次调用会重置 logger 的默认 handler，重复调用安全。
     run_tag 例：'2026-W09' 或 '2026-W09-dryrun'。
     """
-    logs_dir = data_dir / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    log_file = logs_dir / f"{run_tag}.log"
-
     # Windows 下默认控制台编码可能非 UTF-8，尽量统一为 UTF-8（失败则忽略）
     try:
         if sys.stderr is not None and hasattr(sys.stderr, "reconfigure"):
@@ -34,6 +31,11 @@ def setup_logging(data_dir: Path, run_tag: str, level: str = "INFO") -> Path:
 
     logger.remove()
     logger.add(sys.stderr, format=_FORMAT, level=level.upper(), colorize=True)
+    if not write_file:
+        return None
+    logs_dir = data_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    log_file = logs_dir / f"{run_tag}.log"
     logger.add(
         log_file,
         format=_FORMAT,

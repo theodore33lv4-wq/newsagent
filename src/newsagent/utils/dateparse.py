@@ -10,8 +10,11 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
+from urllib.parse import urlsplit
+
+from .dates import as_local, now_local
 
 _CN_NUM = {"元": 1, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6,
            "七": 7, "八": 8, "九": 9, "十": 10}
@@ -25,7 +28,7 @@ _FULL_PATTERNS = [
 # URL 中的日期：/2026-09/10/ 、/2026/09/10/ 、/202609/t20260910_
 _URL_PATTERNS = [
     re.compile(r"/(20\d{2})[-/](\d{1,2})/(\d{1,2})/"),
-    re.compile(r"/(20\d{2})(\d{2})/t(20\d{2})(\d{2})(\d{2})_"),
+    re.compile(r"/t(20\d{2})(\d{2})(\d{2})_"),
     re.compile(r"/(20\d{2})/(\d{1,2})/(\d{1,2})/"),
 ]
 _REL_PATTERNS = [
@@ -106,49 +109,51 @@ def parse_date_from_url(url: str, *, today: Optional[date] = None) -> Optional[d
     """从 URL 路径中提取日期（列表页与详情页通用）。"""
     if not url:
         return None
-    today = today or date.today()
+    today = today or now_local().date()
+    try:
+        path = urlsplit(url).path
+    except ValueError:
+        return None
     for pat in _URL_PATTERNS:
-        m = pat.search(url)
+        m = pat.search(path)
         if not m:
             continue
-        nums = [int(g) for g in m.groups() if g]
-        if len(nums) == 5:          # /202609/t20260910_
-            d = _mk(nums[2], nums[3], nums[4])
-        elif len(nums) >= 3:
-            d = _mk(nums[0], nums[1], nums[2])
-        else:
-            continue
+        d = _mk(*(int(group) for group in m.groups()))
         if is_sane(d, today=today):
             return d
-    return parse_date_from_text(url, today=today)
+    return None
 
 
-def normalize_date(value, *, today: Optional[date] = None) -> Optional[date]:
+def normalize_date(value, *, today: Optional[date] = None,
+                   tz_name: str | None = None) -> Optional[date]:
     """把各种日期表示统一成 date：ISO 串、时间戳、常见中文格式。"""
     if value is None:
         return None
+    today = today or now_local(tz_name).date()
     if isinstance(value, date) and not isinstance(value, datetime):
         return value if is_sane(value, today=today) else None
     if isinstance(value, datetime):
-        d = value.date()
+        d = as_local(value, tz_name).date()
         return d if is_sane(d, today=today) else None
-    if isinstance(value, (int, float)):
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
         ts = float(value)
         if ts > 1e12:
             ts /= 1000.0
         try:
-            d = datetime.fromtimestamp(ts).date()
+            d = as_local(datetime.fromtimestamp(ts, tz=timezone.utc), tz_name).date()
         except (OverflowError, OSError, ValueError):
             return None
         return d if is_sane(d, today=today) else None
     text = str(value).strip()
     if not text:
         return None
-    m = re.match(r"(20\d{2})-(\d{2})-(\d{2})", text)   # 2026-09-10T10:00:00+08:00
-    if m:
-        d = _mk(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return parse_date_from_text(text, today=today)
+    else:
+        d = as_local(dt, tz_name).date()
         return d if is_sane(d, today=today) else None
-    return parse_date_from_text(text, today=today)
 
 
 def to_iso(d: Optional[date]) -> Optional[str]:

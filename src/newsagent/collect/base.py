@@ -85,11 +85,13 @@ def polite_sleep(cfg: Config) -> None:
 
 
 class Collector(ABC):
-    """单源采集器。collect() 返回候选 Article 列表；失败时应记日志但不抛出。"""
+    """单源采集器。部分失败可保留已取得的文章，并记录原因。"""
 
     def __init__(self, cfg: Config, source: dict):
         self.cfg = cfg
         self.source = D(source)
+        self.errors: list[str] = []
+        self.coverage_warning: str | None = None
 
     @property
     def source_id(self) -> str:

@@ -66,8 +66,8 @@ def to_docx(data: ReportData, path: Path) -> None:
     _para(doc, data.overview or "（无）")
     for pt in data.overview_points:
         _bullet(doc, "", pt)
-    if data.fallback:
-        _para(doc, "（说明：本节为自动降级生成，LLM 服务暂不可用）", size=9)
+    if data.review_note:
+        _para(doc, data.review_note, size=9)
 
     # 类别分布
     if data.distribution:

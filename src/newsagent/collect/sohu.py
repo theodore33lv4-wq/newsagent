@@ -18,12 +18,12 @@ from urllib.parse import urljoin
 
 from loguru import logger
 
-from .base import Article, Collector, fetch, new_http_client
+from .base import Article, Collector, fetch, new_http_client, polite_sleep
 
 # 候选接口（按顺序尝试；xpt 为搜狐号标识）
 _API_CANDIDATES = [
-    "https://api.mp.sohu.com/mp/v2/article/list?xpt={xpt}&pageNo=1&pageSize={limit}",
-    "https://v2.sohu.com/author-page-api/author-articles/pc/{xpt}?page=1&size={limit}",
+    "https://api.mp.sohu.com/mp/v2/article/list?xpt={xpt}&pageNo={page}&pageSize={limit}",
+    "https://v2.sohu.com/author-page-api/author-articles/pc/{xpt}?page={page}&size={limit}",
     "https://mp.sohu.com/api_v3/profile/v2/profileInfo?xpt={xpt}",
 ]
 
@@ -40,38 +40,49 @@ class SohuAccountCollector(Collector):
         xpt = str(self.source.get("xpt", "")).strip()
         profile_url = str(self.source.get("profile_url") or "").strip()
         if not profile_url:
-            logger.error("[{}] 缺少 profile_url 配置", self.source_id)
-            return []
+            raise ValueError("缺少 profile_url 配置")
 
         # 策略 A：主页内嵌 JSON（实测有效主路径）
+        articles: list[Article] = []
         try:
-            articles = self._collect_from_page(profile_url)
-            if articles:
-                logger.info("[{}] 策略A(页面数据) 采集 {} 条", self.source_id, len(articles))
-                return articles
-            logger.debug("[{}] 策略A 未在页面中发现文章数据", self.source_id)
+            articles = list({a.url: a for a in self._collect_from_page(profile_url)}.values())
         except Exception as exc:
             logger.debug("[{}] 策略A 失败: {}", self.source_id, exc)
 
-        # 策略 B：候选 API
+        self.coverage_warning = "作者主页及候选接口的历史覆盖范围未核实为整周"
+        seen = {a.url for a in articles}
+        max_pages = max(1, int(self.source.get("max_pages", 3)))
         for tmpl in _API_CANDIDATES:
-            try:
-                url = tmpl.format(xpt=xpt, limit=self.limit)
-                resp = fetch(url, self.cfg)
-                data = json.loads(resp.text)
-                items = self._extract_items(data)
-                if items:
-                    articles = [self._to_article(it) for it in self._drop_blacklisted(items)]
-                    articles = [a for a in articles if a.url and a.title]
-                    articles = articles[: self.limit]
-                    logger.info("[{}] 策略B(API {}) 采集 {} 条", self.source_id,
-                                url.split("?")[0], len(articles))
-                    return articles
-            except Exception as exc:
-                logger.debug("[{}] 策略B 失败 {}: {}", self.source_id, tmpl.split("?")[0], exc)
-
-        logger.warning("[{}] 所有采集策略均未取得文章（{}）", self.source_id, xpt)
-        return []
+            if len(articles) >= self.limit or not xpt:
+                break
+            paged = "{page}" in tmpl
+            visited: set[str] = set()
+            for page in range(1, (max_pages if paged else 1) + 1):
+                polite_sleep(self.cfg)
+                try:
+                    url = tmpl.format(xpt=xpt, limit=min(self.limit, 20), page=page)
+                    items = self._extract_items(json.loads(fetch(url, self.cfg).text))
+                except Exception as exc:
+                    if visited:
+                        self.errors.append(f"搜狐分页在第 {page} 页失败: {exc}")
+                    logger.debug("[{}] 候选 API 失败: {}", self.source_id, exc)
+                    break
+                batch = [self._to_article(it) for it in self._drop_blacklisted(items)]
+                urls = {a.url for a in batch if a.title}
+                if not urls - visited:
+                    break
+                visited.update(urls)
+                for article in batch:
+                    if article.url not in seen and article.title:
+                        articles.append(article)
+                        seen.add(article.url)
+                if len(articles) >= self.limit:
+                    break
+        if not articles:
+            raise ValueError("所有搜狐采集策略均未取得文章")
+        if len(articles) >= self.limit:
+            self.coverage_warning = f"已达到单源上限 {self.limit}"
+        return articles[:self.limit]
 
     # ---- 页面 JSON 提取 ----
     def _collect_from_page(self, profile_url: str) -> list[Article]:
@@ -101,7 +112,7 @@ class SohuAccountCollector(Collector):
                     pass
 
             articles = [self._to_article(it) for it in self._drop_blacklisted(items)]
-            return [a for a in articles if a.url and a.title][: self.limit]
+            return [a for a in articles if a.url and a.title]
 
     # ---- 数据提取 ----
     @staticmethod
@@ -175,10 +186,8 @@ class SohuAccountCollector(Collector):
                 except (OverflowError, OSError, ValueError):
                     continue
             s = str(v).strip()
-            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d",
-                        "%Y/%m/%d %H:%M:%S", "%Y/%m/%d"):
-                try:
-                    return datetime.strptime(s[:19], fmt).replace(tzinfo=timezone.utc)
-                except ValueError:
-                    continue
+            try:
+                return datetime.fromisoformat(s.replace("/", "-"))
+            except ValueError:
+                continue
         return None

@@ -48,25 +48,28 @@ def test_short_source_name(cfg):
 
 
 def test_report_layer_dedupe(cfg):
-    """报告层查重：标题相同的跨源转载只保留一条。"""
+    """报告层仅合并相同全文，保留同名异文。"""
     rows = [
         {"guid": "d1", "title": "山西主骨架公路5年内实现数字化升级",
          "source_name": "交通运输部", "published_at": "2026-09-10", "tags": ["政策标准与行业/国家政策法规"],
          "companies": [], "importance": 2, "summary": "s", "url": "https://a/1",
-         "html_file": None, "content_hash": "h1"},
+         "html_file": None, "content_hash": "v2:h1"},
         {"guid": "d2", "title": "山西主骨架公路5年内实现数字化升级",
          "source_name": "中国交通新闻网", "published_at": "2026-09-10", "tags": ["政策标准与行业/国家政策法规"],
          "companies": [], "importance": 2, "summary": "s", "url": "https://b/2",
-         "html_file": None, "content_hash": "h2"},
+         "html_file": None, "content_hash": "v2:h1"},
         {"guid": "d3", "title": "城市摆渡人变身治理合伙人",
          "source_name": "交通运输部", "published_at": "2026-09-11", "tags": ["交管技术与业务/信号控制优化"],
          "companies": [], "importance": 1, "summary": "s", "url": "https://a/3",
-         "html_file": None, "content_hash": "h3"},
+         "html_file": None, "content_hash": "v2:h3"},
     ]
     data = generate(cfg, MockLLMProvider(), "2026-W35", rows, "now")
     titles = [it["title"] for it in data.items]
     assert titles.count("山西主骨架公路5年内实现数字化升级") == 1
     assert len(data.items) == 2
+    rows[1]["content_hash"] = "v2:h2"
+    data = generate(cfg, MockLLMProvider(), "2026-W35", rows, "now")
+    assert len(data.items) == 3
 
 
 def test_long_notes_not_truncated(cfg):
@@ -85,7 +88,9 @@ def test_long_notes_not_truncated(cfg):
                 "top5": [1], "trends": {"macro": ["m"], "projects": ["p"], "vendor_advice": ["v"]},
                 "next_week": ["n"],
             }, ensure_ascii=False)
-    data = generate(cfg, LongNoteProvider(), "2026-W35", ROWS, "now")
+    cfg.report.summary_max_chars = 500
+    rows = [{**row, "summary": long_note} for row in ROWS]
+    data = generate(cfg, LongNoteProvider(), "2026-W35", rows, "now")
     notes = [it["note"] for t in data.themes for it in t["items"]]
     assert notes and all(n == long_note for n in notes)
     assert len(notes[0]) > 80 and "…" not in notes[0]
@@ -182,7 +187,7 @@ def test_report_retries_on_bad_json(cfg):
                 "notes": [{"idx": i, "note": f"第 {i} 条要点内容，描述具体事实与看点。"}
                           for i in (1, 2)],
                 "overview": "本周概览正文。", "overview_points": ["要点一"],
-                "top5": [1], "trends": {"macro": ["宏观"], "projects": ["项目"],
+                "top5": [1, 2], "trends": {"macro": ["宏观"], "projects": ["项目"],
                                         "vendor_advice": ["建议"]},
                 "next_week": ["关注"],
             }, ensure_ascii=False)
@@ -208,3 +213,66 @@ def test_report_falls_back_after_retries(cfg):
     assert BrokenProvider.calls == 2       # 1 次 + json_retries(1)
     assert data.fallback is True
     assert data.overview and data.themes    # 降级内容仍然完整
+
+
+def test_report_marks_salvaged_notes_as_degraded(cfg):
+    provider = MockLLMProvider(lambda _: '{"notes":[{"idx":1,"note":"已输出要点"}],"overview":"截断')
+    data = generate(cfg, provider, "2026-W35", ROWS, "now")
+    assert data.fallback and not data.top5
+    assert "已输出要点" in [item["note"] for theme in data.themes for item in theme["items"]]
+
+
+def test_report_escapes_text_and_rejects_unsafe_links(cfg):
+    row = {**ROWS[0], "title": '<script>alert("test")</script>', "url": "javascript:alert(1)"}
+    html = render_html(generate(cfg, MockLLMProvider(), "2026-W35", [row], "now"))
+    assert "&lt;script&gt;" in html
+    assert "<script>" not in html and 'href="javascript:' not in html
+
+
+def test_report_format_and_input_limit_preserve_appendix(cfg):
+    cfg.report.update(formats=["docx"], max_items=1)
+    out = write_report(cfg, MockLLMProvider(), "2026-W35", ROWS)
+    assert out["docx_path"].is_file() and out["json_path"].is_file()
+    assert "html_path" not in out and not list(cfg.data_dir.rglob("*.html"))
+    assert len(out["data"].items) == 2 and out["data"].top5 == [1]
+
+
+def test_same_title_reprint_with_extra_navigation_and_distinct_revision(cfg):
+    body = "交管部门在多个路口部署信号控制设备，并公布项目阶段。" * 20 + "投资额为1.2亿元。"
+    source = {**ROWS[0], "guid": "orig", "title": "智慧交通项目进展"}
+    reprint = {**source, "guid": "reprint", "source_name": "转载站", "published_at": "2026-08-25"}
+    revision = {**reprint, "guid": "revision", "source_name": "另一来源"}
+    bodies = {"orig": body, "reprint": f"来源：新闻频道。{body}更多资讯",
+              "revision": body.replace("1.2亿元", "12亿元")}
+    data = generate(cfg, MockLLMProvider(), "2026-W35", [source, reprint, revision], "now",
+                    load_text=lambda row: bodies[row["guid"]])
+    assert [it["guid"] for it in data.items] == ["orig", "revision"]
+
+
+def test_report_checks_model_stage_and_original_year(cfg):
+    import json
+
+    rows = [
+        {**ROWS[0], "title": "上海交通委介绍行动方案", "summary": "上海编制了行动方案。"},
+        {**ROWS[1], "title": "监测预警行业研究", "summary": "研究报告显示，2025年投资增长超200%。"},
+    ]
+    reply = {
+        "notes": [{"idx": 1, "note": "上海正式发布行动方案。"},
+                  {"idx": 2, "note": "研究报告显示，2025年投资增长超200%。"}],
+        "overview": "上海正式发布行动方案 [1]。投资增长超200% [2]。",
+        "overview_points": ["上海已发布方案 [1]"],
+        "top5": [1, 2],
+        "trends": {"macro": ["研究显示2025年投资增长超200% [2]"],
+                   "projects": ["投资增长超300% [2]"], "vendor_advice": []},
+        "next_week": ["后续关注 [999]"],
+    }
+    data = generate(cfg, MockLLMProvider(lambda _: json.dumps(reply)), "2026-W35", rows, "now")
+    assert data.fallback and data.evidence_adjustments == 6
+    assert "6 处表述因证据不足" in render_html(data)
+    assert "发布" not in data.overview and "上海编制了行动方案" in data.overview
+    assert "2025年投资增长超200%" in data.overview
+    assert data.trends_macro == ["研究显示2025年投资增长超200% [2]"]
+    assert "300%" not in data.trends_projects[0]
+    assert not data.next_week
+    notes = {note["idx"]: note["note"] for theme in data.themes for note in theme["items"]}
+    assert notes[1] == "上海编制了行动方案。"

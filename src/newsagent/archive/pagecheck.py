@@ -7,8 +7,8 @@
   aggregate_title  标题是"汇总/盘点/合集"类聚合贴
   template_title   标题是站点模板标题（栏目页/专题页特征，如 A|B|C_站点名）
   too_short        正文过短，不是一篇报道
-  high_link_density 正文几乎全是链接（列表/导航页特征）
-日期缺失不直接拒绝：交给大模型判定（日期兜底），仍拿不到日期才丢弃。
+  high_link_density 页面链接密集，且缺少可信的正文段落
+日期缺失交给大模型补判，仍无法确定时可保留待核验。
 """
 
 from __future__ import annotations
@@ -20,22 +20,19 @@ from typing import Optional
 
 from bs4 import BeautifulSoup
 
-from ..utils.dateparse import normalize_date, parse_date_from_text, parse_date_from_url
+from ..utils.dateparse import normalize_date, parse_date_from_url
+from ..utils.dates import now_local
 from ..utils.config import Config
 
 _AGGREGATE_RE = re.compile(
     r"汇总|盘点|合集|一览表|一览$|周刊合集|主题汇总|资料汇编|导航页|目录页")
 
 # 页面内日期线索
-_META_PATTERNS = [
-    re.compile(r'<meta[^>]+(?:property|name)=["\'](?:article:published_time|og:release_date|'
-               r'publishdate|pubdate|weibo:article:create_at|date|pubDate)["\'][^>]*'
-               r'content=["\']([^"\']+)', re.I),
-    re.compile(r'"(?:publishTime|pubTime|publishedTime|datePublished|createTime|releaseDate)"'
-               r'\s*:\s*"([^"]{6,40})"', re.I),
-    re.compile(r"(?:发布时间|发布日期|发布于|时间)\s*[:：]\s*"
-               r"(20\d{2}[-/年.]\d{1,2}[-/月.]\d{1,2})"),
-]
+_PUBLISHED_META = {"article:published_time", "og:release_date", "publishdate", "pubdate",
+                   "weibo:article:create_at", "datepublished"}
+_STRUCTURED_DATE = re.compile(r'"datePublished"\s*:\s*"([^"]+)"', re.I)
+_PUBLISHED_LABEL = re.compile(r"(?:发布时间|发布日期|发布于)\s*[:：]?\s*"
+                              r"(20\d{2}[-/年.]\d{1,2}[-/月.]\d{1,2})")
 
 
 @dataclass
@@ -63,6 +60,23 @@ def link_density(html: str) -> float:
         return 0.0
 
 
+def _has_prose(html: str, extracted: str, min_chars: int) -> bool:
+    """确认抽出的正文在页面中有独立段落，避免推荐链接抬高整页密度。"""
+    soup = BeautifulSoup(html, "lxml")
+    text = re.sub(r"\s+", "", extracted)
+    prose = set()
+    for paragraph in soup.find_all("p"):
+        if paragraph.find_parent(["a", "nav", "header", "footer", "aside"]):
+            continue
+        if paragraph.find("a"):
+            continue
+        content = paragraph.get_text("", strip=True)
+        content = re.sub(r"\s+", "", content)
+        if len(content) >= 40 and re.search(r"[。！？.!?]", content) and content in text:
+            prose.add(content)
+    return sum(map(len, prose)) >= min_chars
+
+
 def title_is_template(title: str, source_name: str = "") -> bool:
     """站点模板标题识别：多段竖线分隔、或与来源名高度重合。"""
     t = (title or "").strip()
@@ -78,34 +92,38 @@ def title_is_template(title: str, source_name: str = "") -> bool:
 
 
 def extract_page_date(html: str, url: str = "",
-                      meta_date: Optional[str] = None) -> Optional[date]:
-    """多策略抽取页面发布日期：meta/JSON → 正文声明 → trafilatura → URL。"""
+                      meta_date: Optional[str] = None, *, fallback_date: date | None = None,
+                      tz_name: str | None = None) -> Optional[date]:
+    """优先使用明确的发布时间，再用链接与列表线索。"""
+    today = now_local(tz_name).date()
     if html:
-        for pat in _META_PATTERNS:
-            for m in pat.finditer(html):
-                d = normalize_date(m.group(1))
-                if d:
-                    return d
-    d = normalize_date(meta_date) if meta_date else None
-    if d:
-        return d
-    if url:
-        d = parse_date_from_url(url)
-        if d:
-            return d
-    if html:
-        # 正文中的"2026-09-10 10:30"这类时间戳，取首个合理日期
-        d = parse_date_from_text(html[:20000])
-        if d:
-            return d
-    return None
+        soup = BeautifulSoup(html, "lxml")
+        for meta in soup.find_all("meta"):
+            key = str(meta.get("property") or meta.get("name") or meta.get("itemprop") or "").lower()
+            if key in _PUBLISHED_META:
+                published = normalize_date(meta.get("content"), today=today, tz_name=tz_name)
+                if published:
+                    return published
+        for script in soup.find_all("script", type="application/ld+json"):
+            for match in _STRUCTURED_DATE.finditer(script.string or ""):
+                published = normalize_date(match[1], today=today, tz_name=tz_name)
+                if published:
+                    return published
+        for tag in soup(["header", "footer", "nav", "aside", "script", "style"]):
+            tag.decompose()
+        for match in _PUBLISHED_LABEL.finditer(soup.get_text(" ", strip=True)):
+            published = normalize_date(match[1], today=today, tz_name=tz_name)
+            if published:
+                return published
+    return (parse_date_from_url(url, today=today) or fallback_date
+            or normalize_date(meta_date, today=today, tz_name=tz_name))
 
 
 def validate_page(title: str, text: Optional[str], html: str, url: str,
                   *, source_name: str = "", cfg: Optional[Config] = None,
                   meta_date: Optional[str] = None,
                   fallback_date: Optional[date] = None,
-                  density: Optional[float] = None) -> PageVerdict:
+                  density: Optional[float] = None, allow_short: bool = False) -> PageVerdict:
     """返回体检结论；ok=False 时 reason 说明拒绝原因。"""
     arc = (cfg.archive if cfg is not None else {}) or {}
     min_chars = int(arc.get("min_text_chars", 300))
@@ -119,12 +137,14 @@ def validate_page(title: str, text: Optional[str], html: str, url: str,
         return PageVerdict(False, "template_title")
 
     body = (text or "").strip()
-    if len(body) < min_chars:
+    if not allow_short and len(body) < min_chars:
         return PageVerdict(False, "too_short")
 
     density = link_density(html) if density is None else density
-    if density > max_density:
+    min_prose = max(1, int(arc.get("min_prose_chars", 100)))
+    if density > max_density and not _has_prose(html, body, min_prose):
         return PageVerdict(False, "high_link_density")
 
-    pub = extract_page_date(html, url, meta_date) or fallback_date
+    tz_name = cfg.app.get("timezone") if cfg is not None else None
+    pub = extract_page_date(html, url, meta_date, fallback_date=fallback_date, tz_name=tz_name)
     return PageVerdict(True, None, pub, date_missing=pub is None)

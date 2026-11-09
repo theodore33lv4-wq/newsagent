@@ -1,6 +1,6 @@
 """周编号与时间工具测试。"""
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 
@@ -28,6 +28,13 @@ def test_week_range():
 def test_week_label():
     label = week_label_cn("2026-W35")
     assert "2026" in label and "第35周" in label
+    assert week_label_cn("2026-W01").startswith("2026年第1周")
+
+
+def test_iso_week_converts_aware_timestamp_before_week_calculation():
+    sunday_utc = datetime(2026, 8, 30, 17, tzinfo=timezone.utc)
+    assert iso_week(sunday_utc, "Asia/Shanghai") == "2026-W36"
+    assert target_week(sunday_utc, "Asia/Shanghai") == "2026-W35"
 
 
 def test_week_range_invalid():

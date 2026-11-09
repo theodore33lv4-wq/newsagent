@@ -27,21 +27,21 @@ def test_classify_basic(cfg):
 
 
 def test_invalid_tags_filtered(cfg):
-    obj = {"relevant": True, "tags": ["不存在的标签", "市场与项目/厂商中标与订单"],
+    obj = {"is_article": True, "relevant": True, "tags": ["不存在的标签", "市场与项目/厂商中标与订单"],
            "summary": "s", "keywords": [], "companies": [], "importance": 2}
     cls = Tagger(Responder(obj), cfg).classify_one(ROW, "t")
     assert cls.tags == ["市场与项目/厂商中标与订单"]
 
 
 def test_vendor_floor(cfg):
-    obj = {"relevant": True, "tags": ["市场与项目/厂商中标与订单"], "summary": "s",
+    obj = {"is_article": True, "relevant": True, "tags": ["市场与项目/厂商中标与订单"], "summary": "s",
            "keywords": [], "companies": [], "importance": 1}
     cls = Tagger(Responder(obj), cfg).classify_one(ROW, "t")
     assert cls.importance == 2  # 下限提升
     obj["importance"] = 9
-    assert Tagger(Responder(obj), cfg).classify_one(ROW, "t").importance == 3
+    assert not Tagger(Responder(obj), cfg).classify_one(ROW, "t").ok
     obj["importance"] = "x"
-    assert Tagger(Responder(obj), cfg).classify_one(ROW, "t").importance is None
+    assert not Tagger(Responder(obj), cfg).classify_one(ROW, "t").ok
 
 
 def test_bad_json_retry_then_fallback(cfg):
@@ -70,3 +70,24 @@ def test_classify_many_order(cfg):
     res = tag.classify_many(rows, concurrency=3)
     assert [r.guid for r in res] == [f"g{i}" for i in range(5)]
     assert all(r.ok for r in res)
+
+
+def test_invalid_batch_items_retry_as_single_with_configured_model(cfg):
+    class RepairingProvider:
+        def __init__(self):
+            self.models = []
+
+        def chat(self, messages, **kw):
+            self.models.append(kw["model"])
+            if '"results"' in messages[0]["content"]:
+                return '{"results":[{"idx":1},{"idx":1}]}'
+            return '{"is_article":true,"relevant":true,"tags":["市场与项目"],' \
+                   '"summary":"摘要","keywords":[],"companies":[],"importance":2}'
+
+    cfg.llm.tagger_model = "tagger-test"
+    provider = RepairingProvider()
+    [result] = Tagger(provider, cfg).classify_many([ROW])
+    assert result.ok and result.tags == ["市场与项目"]
+    assert provider.models == ["tagger-test", "tagger-test"]
+    assert not Tagger(Responder([1]), cfg).classify_one(ROW, "正文").ok
+    assert not Tagger(Responder({}), cfg).classify_one(ROW, "正文").ok

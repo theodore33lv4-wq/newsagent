@@ -31,6 +31,7 @@ def test_trailing_comma():
     broken = '{"notes": [{"idx": 1, "note": "a"},], "overview": "b",}'
     data = parse_json_lenient(broken)
     assert data and data["overview"] == "b" and len(data["notes"]) == 1
+    assert parse_json_lenient('{"overview":"原始文本 ,] 字符",}') == {"overview": "原始文本 ,] 字符"}
 
 
 def test_truncated_mid_array_salvages_notes():

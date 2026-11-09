@@ -11,10 +11,11 @@
 
 from __future__ import annotations
 
-import json
-import re
-from concurrent.futures import ThreadPoolExecutor
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from datetime import date
+from time import monotonic
 from typing import Optional
 
 from loguru import logger
@@ -90,22 +91,8 @@ class Classification:
 
 
 def extract_json(text: str) -> Optional[dict]:
-    """从模型输出中提取 JSON 对象（容忍代码块围栏/前后杂文）。"""
-    if not text:
-        return None
-    t = text.strip()
-    t = re.sub(r"^```(?:json)?\s*|\s*```$", "", t, flags=re.S).strip()
-    try:
-        return json.loads(t)
-    except Exception:
-        pass
-    start, end = t.find("{"), t.rfind("}")
-    if start != -1 and end > start:
-        try:
-            return json.loads(t[start:end + 1])
-        except Exception:
-            return None
-    return None
+    """从模型输出中提取 JSON 对象。"""
+    return parse_json_lenient(text)
 
 
 class Tagger:
@@ -113,13 +100,13 @@ class Tagger:
         self.provider = provider
         self.cfg = cfg
         self._taxonomy_paths = cfg.taxonomy_paths()
-        self._json_retries = int(cfg.classify.get("json_retries", 1))
+        self._json_retries = max(0, int(cfg.classify.get("json_retries", 1)))
         self._summary_max = int(cfg.classify.get("summary_max_chars", 100))
         self._input_max = int(cfg.classify.get("max_input_chars", 2000))
         self._batch_item_max = int(cfg.classify.get("batch_max_chars_per_item", 1200))
         self._batch_size = int(cfg.classify.get("batch_size", 10))
         self._batch_concurrency = int(cfg.classify.get("batch_concurrency", 2))
-        self._vendor_floor = int(cfg.classify.get("vendor_importance_floor", 2))
+        self._vendor_floor = max(1, min(3, int(cfg.classify.get("vendor_importance_floor", 2))))
 
     # ---------- 对外 ----------
     def classify_many(self, rows: list[dict],
@@ -134,17 +121,30 @@ class Tagger:
         workers = max(1, int(concurrency or self._batch_concurrency))
         batches = [rows[i:i + size] for i in range(0, len(rows), size)]
 
+        def run_batch(batch):
+            started = monotonic()
+            result = self._classify_batch_once(batch, texts)
+            return result, len(batch), monotonic() - started
+
         collected: dict[str, Classification] = {}
+        logger.info("开始打标：{} 条，{} 批，并发 {}", len(rows), len(batches), workers)
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            for part in pool.map(lambda b: self._classify_batch_once(b, texts), batches):
+            futures = [pool.submit(run_batch, batch) for batch in batches]
+            for done, future in enumerate(as_completed(futures), start=1):
+                part, count, seconds = future.result()
                 collected.update(part)
+                logger.info("打标批次进度 {}/{}：成功 {} / {}，待单条补偿 {}，耗时 {:.1f} 秒",
+                            done, len(batches), sum(cls.ok for cls in part.values()), count,
+                            count - len(part), seconds)
 
         out: list[Classification] = []
         retried = 0
+        missing = len(rows) - len(collected)
         for row in rows:
             cls = collected.get(row["guid"])
             if cls is None:                      # 批次缺失 → 单条补偿
                 retried += 1
+                logger.info("单条补偿进度 {}/{}：{}", retried, missing, row["guid"])
                 cls = self.classify_one(row, texts.get(row["guid"]))
             out.append(cls)
 
@@ -162,20 +162,19 @@ class Tagger:
         raw = None
         for attempt in range(self._json_retries + 1):
             try:
-                raw = self.provider.chat(messages, json_mode=True)
+                raw = self.provider.chat(messages, json_mode=True, model=self.cfg.tagger_model)
             except Exception as exc:
                 return Classification(guid=guid, ok=False,
                                       error=f"LLM 调用失败: {exc}", raw=str(exc))
-            data = extract_json(raw) or parse_json_lenient(raw)
-            if data is not None:
-                return self._parse_payload(guid, data, raw)
-            logger.warning("[{}] 第 {} 次输出无法解析为 JSON，重试", guid, attempt + 1)
+            cls = self._parse_payload(guid, extract_json(raw), raw)
+            if cls.ok:
+                return cls
+            logger.warning("[{}] 第 {} 次输出无效: {}", guid, attempt + 1, cls.error)
             messages = messages + [{
                 "role": "user",
-                "content": "注意：你上一次的输出无法被解析为 JSON。请重新输出，且只输出一个合法的 JSON 对象。",
+                "content": "请按要求重新输出一个 JSON 对象，确保字段、类型和标签有效。",
             }]
-        return Classification(guid=guid, ok=False,
-                              error="多次输出均无法解析为 JSON（待人工）", raw=raw)
+        return Classification(guid=guid, ok=False, error="模型多次返回无效打标结果", raw=raw)
 
     # ---------- 批次内部 ----------
     def _classify_batch_once(self, batch: list[dict],
@@ -200,28 +199,27 @@ class Tagger:
              "content": f"共 {len(batch)} 条，请逐条分析：\n\n" + "\n\n".join(sections)},
         ]
         try:
-            raw = self.provider.chat(messages, json_mode=True)
-            data = extract_json(raw) or parse_json_lenient(raw)
-            if not data:
-                logger.warning("批次输出无法解析为 JSON（{} 条），将单条重试", len(batch))
-                return {}
-            out: dict[str, Classification] = {}
-            for item in data.get("results") or []:
-                try:
-                    idx = int(item.get("idx"))
-                except (TypeError, ValueError):
-                    continue
-                if not (1 <= idx <= len(batch)):
-                    continue
-                row = batch[idx - 1]
-                out[row["guid"]] = self._parse_payload(row["guid"], item, raw)
-            missing = len(batch) - len(out)
-            if missing:
-                logger.warning("批次返回缺项 {} / {} 条，缺项将单条重试", missing, len(batch))
-            return out
+            raw = self.provider.chat(messages, json_mode=True, model=self.cfg.tagger_model)
         except Exception as exc:
-            logger.warning("批次调用失败（{} 条），将单条重试: {}", len(batch), exc)
+            return {r["guid"]: Classification(guid=r["guid"], ok=False,
+                                               error=f"LLM 批次调用失败: {exc}") for r in batch}
+        results = (extract_json(raw) or {}).get("results")
+        if not isinstance(results, list):
             return {}
+        valid_items = [
+            item for item in results if isinstance(item, dict)
+            and type(item.get("idx")) is int and 1 <= item["idx"] <= len(batch)
+        ]
+        counts = Counter(item["idx"] for item in valid_items)
+        out: dict[str, Classification] = {}
+        for item in valid_items:
+            idx = item["idx"]
+            if counts[idx] == 1:
+                guid = batch[idx - 1]["guid"]
+                cls = self._parse_payload(guid, item, raw)
+                if cls.ok:
+                    out[guid] = cls
+        return out
 
     # ---------- 提示词与解析 ----------
     def _build_single_messages(self, row: dict, text: Optional[str]) -> list[dict]:
@@ -237,29 +235,48 @@ class Tagger:
                 f"【正文】\n{body or '（正文提取失败，请仅依据标题判断）'}")
         return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
-    def _parse_payload(self, guid: str, data: dict, raw: str) -> Classification:
-        is_article = self._as_bool(data.get("is_article"), default=True)
-        relevant = self._as_bool(data.get("relevant"), default=True)
-        if not is_article:
-            relevant = False
+    def _parse_payload(self, guid: str, data: dict | None, raw: str) -> Classification:
+        invalid = Classification(guid=guid, ok=False, error="缺少字段或字段类型无效", raw=raw)
+        if data is None:
+            return invalid
+        is_article = data.get("is_article")
+        relevant = data.get("relevant")
+        if type(is_article) is not bool or type(relevant) is not bool or (relevant and not is_article):
+            return invalid
 
-        tags = self._filter_tags(self._as_str_list(data.get("tags"))) if relevant else []
-        summary = self._as_str(data.get("summary")) or None
-        keywords = self._as_str_list(data.get("keywords")) if relevant else []
-        companies = self._as_str_list(data.get("companies")) if relevant else []
-        importance = self._as_int(data.get("importance")) if relevant else None
-        pub = normalize_date(data.get("published_date"))
+        pub = data.get("published_date")
+        if pub is not None:
+            try:
+                parsed = date.fromisoformat(pub)
+            except (ValueError, TypeError):
+                return invalid
+            if pub != parsed.isoformat() or normalize_date(parsed, tz_name=self.cfg.app.get("timezone")) is None:
+                return invalid
 
-        if tags and any(is_vendor_tag(t) for t in tags) and importance is not None:
-            if importance < self._vendor_floor:
-                importance = self._vendor_floor
-                logger.debug("[{}] 厂商类新闻重要度提升至 {}", guid, importance)
+        if not relevant:
+            return Classification(guid=guid, is_article=is_article, published_date=pub,
+                                  relevant=False, raw=raw)
+        tags, keywords, companies = (data.get(key) for key in ("tags", "keywords", "companies"))
+        if not all(isinstance(values, list) and all(isinstance(value, str) for value in values)
+                   for values in (tags, keywords, companies)):
+            return invalid
+        tags = self._filter_tags(tags)
+        summary = data.get("summary")
+        importance = data.get("importance")
+        if (not tags or not isinstance(summary, str) or not summary.strip()
+                or type(importance) is not int or not 1 <= importance <= 3):
+            return invalid
+
+        if importance < self._vendor_floor and any(is_vendor_tag(t) for t in tags):
+            importance = self._vendor_floor
+            logger.debug("[{}] 厂商类新闻重要度提升至 {}", guid, importance)
 
         return Classification(
             guid=guid, is_article=is_article,
-            published_date=pub.isoformat() if pub else None,
-            relevant=relevant, tags=tags, summary=summary,
-            keywords=keywords, companies=companies, importance=importance,
+            published_date=pub,
+            relevant=relevant, tags=tags, summary=summary.strip(),
+            keywords=[x.strip() for x in keywords if x.strip()],
+            companies=[x.strip() for x in companies if x.strip()], importance=importance,
             ok=True, raw=raw,
         )
 
@@ -273,40 +290,3 @@ class Tagger:
             else:
                 logger.debug("标签不在合法集合，已丢弃: {!r}", t)
         return out
-
-    @staticmethod
-    def _as_bool(v, *, default: bool = True) -> bool:
-        if isinstance(v, bool):
-            return v
-        if isinstance(v, str):
-            s = v.strip().lower()
-            if s in ("true", "yes", "1", "是"):
-                return True
-            if s in ("false", "no", "0", "否"):
-                return False
-        if isinstance(v, (int, float)):
-            return bool(v)
-        return default
-
-    @staticmethod
-    def _as_str(v) -> Optional[str]:
-        return str(v).strip() if v is not None else None
-
-    @classmethod
-    def _as_str_list(cls, v) -> list[str]:
-        if not isinstance(v, list):
-            return []
-        out = []
-        for item in v:
-            s = cls._as_str(item)
-            if s:
-                out.append(s)
-        return out
-
-    @staticmethod
-    def _as_int(v) -> Optional[int]:
-        try:
-            i = int(v)
-        except (TypeError, ValueError):
-            return None
-        return max(1, min(3, i))

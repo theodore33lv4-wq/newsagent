@@ -116,6 +116,7 @@ def main() -> int:
         try:
             resp = httpx.get(url, timeout=10.0, follow_redirects=True,
                              headers={"User-Agent": cfg.collect.get("user_agent", "")})
+            resp.raise_for_status()
             ok(f"[{s.get('id')}] {s.get('name')} HTTP {resp.status_code}")
         except Exception as exc:
             bad(f"[{s.get('id')}] {s.get('name')} 不可达: {exc}")

@@ -80,11 +80,27 @@ def test_recover_filtered(cfg, article, sample_html):
     # 过滤中的条目不会进入周报（relevance 为空）
     assert st.get_week("2026-W38") == []
 
-    assert st.recover_filtered("2026-W38") == 1
-    rows = st.query(week="2026-W38", relevant_only=False)
-    assert rows[0]["status"] == "archived" and rows[0]["relevance"] is None
-    assert st.list_filtered("2026-W38") == []
-    assert st.recover_filtered("2026-W38") == 0        # 幂等
+    other = st.save_article("2026-W38", Article("https://example.com/non-news", "栏目页", "s", "源"),
+                            fc, status="filtered")
+    assert st.recover_filtered("2026-W38", [row["guid"]]) == 1
+    [restored] = st.query(week="2026-W38", status="archived", relevant_only=False)
+    assert restored["guid"] == row["guid"] and restored["relevance"] is None
+    assert [r["guid"] for r in st.list_filtered("2026-W38")] == [other["guid"]]
+    assert st.recover_filtered("2026-W38", [row["guid"]]) == 0
+
+
+def test_import_preserves_corrected_week_and_date(cfg, article, sample_html):
+    st = _make_store(cfg)
+    row = st.save_article("2026-W38", article, FetchedContent(sample_html, "正文", "bs4", None, None))
+    st.update_classification(row["guid"], relevance=1, tags=["市场与项目"], summary="s",
+                             keywords=[], companies=[], importance=2,
+                             published_iso="2026-09-21", week="2026-W39")
+    st.upsert_article(row)
+    [saved] = st.get_week("2026-W39")
+    assert saved["published_at"] == "2026-09-21"
+    assert st.reset_week("2026-W38") == 0
+    assert st.reset_week("2026-W39") == 1
+    assert st.query(week="2026-W39", status="archived", relevant_only=False)
 
 
 def test_guid(cfg):

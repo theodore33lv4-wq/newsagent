@@ -1,8 +1,8 @@
-"""三层去重：URL 规范化 → 标题归一化 → （内容哈希由存档层做二次校验）。
+"""采集按 URL 去重，报告比对全文，标题归一化用于存档索引。
 
 - URL 规范化：统一小写 host、去锚点、去跟踪参数（utm_*/spm）、去尾斜杠；
 - 标题归一化：NFKC + 仅保留中英文与数字（去空白/标点/大小写差异）；
-- 内容哈希：正文抽取后由存档层二次校验（见 archive.store）。
+- 内容哈希：按抽取出的全文生成。
 """
 
 from __future__ import annotations
@@ -57,31 +57,23 @@ def title_key(title: str) -> str:
     return _sha1(normalize_title(title))
 
 
-def content_key(text: str, chars: int = 800) -> str:
-    """正文内容哈希（存档层二次校验用）。"""
-    norm = _KEEP_CHARS.sub("", unicodedata.normalize("NFKC", text or ""))[:chars]
-    return _sha1(norm)
+def content_key(text: str) -> str:
+    """按全文比对，仅忽略空白排版差异。v2 与旧的前缀哈希区分。"""
+    normalized = " ".join(text.split())
+    return f"v2:{hashlib.sha256(normalized.encode('utf-8')).hexdigest()}"
 
 
 class DedupChecker:
-    """基于历史 URL/标题 key 集合的去重检查器（纯内存，由调用方从 SQLite 装载）。"""
+    """基于历史 URL key 的去重检查器。"""
 
-    def __init__(self, seen_url_keys: Iterable[str] = (),
-                 seen_title_keys: Iterable[str] = ()):
+    def __init__(self, seen_url_keys: Iterable[str] = ()):
         self._urls: set[str] = set(seen_url_keys)
-        self._titles: set[str] = set(seen_title_keys)
-
-    def seen_count(self) -> tuple[int, int]:
-        return len(self._urls), len(self._titles)
 
     def is_new(self, article: Article) -> bool:
-        """URL 与标题均未出现过 → 新条目。"""
-        return (url_key(article.url) not in self._urls
-                and title_key(article.title) not in self._titles)
+        return url_key(article.url) not in self._urls
 
     def add(self, article: Article) -> None:
         self._urls.add(url_key(article.url))
-        self._titles.add(title_key(article.title))
 
     def dedupe(self, articles: Iterable[Article]) -> list[Article]:
         """就地过滤：仅返回新条目并登记。"""
@@ -95,5 +87,5 @@ class DedupChecker:
                 dropped += 1
         if dropped:
             from loguru import logger
-            logger.debug("去重丢弃 {} 条（URL/标题已存在）", dropped)
+            logger.debug("去重丢弃 {} 条（URL 已存在）", dropped)
         return kept
